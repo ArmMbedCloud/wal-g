@@ -86,16 +86,24 @@ i_load() {
     docker save "$ref" | incus exec "$vm" -- k3s ctr images import -
 }
 
+DEPLOY_SETS=()  # "release|key=tag" collected per image, applied once per release
 i_deploy() {
-    local name=$1 rel=${6%%=*} key=image.tag ref=$7 kc
+    local name=$1 rel=${6%%=*} key=image.tag ref=$7
     [[ "$6" == *=* ]] && key=${6#*=}
     [[ "$rel" == "-" || -z "$rel" ]] && { say "$name: no k3s release, skipped"; return; }
-    kc="$NUCLOUD_PLATFORM/$ENV.kubeconfig"
+    DEPLOY_SETS+=("$rel|$key=${ref##*:}")
+}
+deploy_apply() {
+    local kc="$NUCLOUD_PLATFORM/$ENV.kubeconfig" rel e args
+    [[ ${#DEPLOY_SETS[@]} -gt 0 ]] || return 0
     [[ -f "$kc" ]] || die "no kubeconfig at $kc"
-    say "helmfile apply $rel on $ENV -> ${ref##*:}"
-    ( cd "$NUCLOUD_PLATFORM" && KUBECONFIG="$kc" KUBE_STAGE="$ENV" REPO_ROOT="$NUCLOUD_PLATFORM" \
-        helmfile -f helmfile.yaml -e "$ENV" -l "name=$rel" apply --skip-deps \
-        --set "$key=${ref##*:}" )
+    for rel in $(printf '%s\n' "${DEPLOY_SETS[@]}" | cut -d'|' -f1 | sort -u); do
+        args=()
+        for e in "${DEPLOY_SETS[@]}"; do [[ "${e%%|*}" == "$rel" ]] && args+=(--set "${e#*|}"); done
+        say "helmfile apply $rel on $ENV ${args[*]}"
+        ( cd "$NUCLOUD_PLATFORM" && KUBECONFIG="$kc" KUBE_STAGE="$ENV" REPO_ROOT="$NUCLOUD_PLATFORM" \
+            helmfile -f helmfile.yaml -e "$ENV" -l "name=$rel" apply --skip-deps "${args[@]}" )
+    done
 }
 
 i_push() { guard_tag "$7"; docker push "$7"; }
@@ -110,12 +118,16 @@ case "${1:-}" in
     image) each i_build ;;
     sbom) each i_sbom ;;
     test)
-        grep -q '^FROM .* AS test' "$(IFS='|' read -r _ _ df _ <<<"${IMAGES[0]}"; echo "$df")" \
-            && DOCKER_BUILDKIT=1 docker buildx build --platform "$PLATFORM" --target test . \
-            || say "no test stage" ;;
+        IFS='|' read -r _ _ df _ <<<"${IMAGES[0]}"
+        if grep -qiE '^FROM .* AS test( |$)' "$df"; then
+            DOCKER_BUILDKIT=1 docker buildx build --platform "$PLATFORM" --target test \
+                $([[ "$SSH" == 1 ]] && echo --ssh default) -f "$df" .
+        else
+            say "no test stage in $df"
+        fi ;;
     smoke) each i_smoke ;;
     image-load) each i_load ;;
-    deploy) each i_deploy ;;
+    deploy) each i_deploy; deploy_apply ;;
     push) each i_push ;;
     run) shift; IFS='|' read -r n t _ <<<"${IMAGES[0]}"; docker run --rm -it "$REGISTRY/$n:$t-nucloud.$BUILD_NUMBER" "$@" ;;
     *) echo "Usage: $0 {images|prereqs|image|sbom|test|smoke|image-load|deploy|push|run}" >&2; exit 1 ;;
