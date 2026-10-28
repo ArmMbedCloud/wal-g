@@ -1,0 +1,43 @@
+# Stamped from IzumaNetworks/nucloud templates/nucloud.yml; identical in every repo.
+name: nucloud
+
+on:
+  push:
+    branches: [nucloud]
+  pull_request:
+    branches: [nucloud]
+  workflow_dispatch:
+
+jobs:
+  image:
+    runs-on: [self-hosted, nucloud]
+    permissions:
+      contents: read
+    env:
+      BUILD_NUMBER: ${{ github.run_number }}
+      FA_PRO_TOKEN: ${{ secrets.FA_PRO_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: SSH agent for private git dependencies
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.IZUMABOT_SSH_KEY }}
+      - name: Build
+        run: make image
+      - name: Test
+        run: make test
+      - name: Smoke
+        run: make smoke
+      - name: SBOM
+        run: make sbom
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sbom-${{ github.run_number }}
+          path: sbom-*.spdx.json
+      - name: Push to GHCR
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/nucloud'
+        env:
+          GHCR_TOKEN: ${{ secrets.GHCR_PUSH_TOKEN }}
+        run: |
+          echo "$GHCR_TOKEN" | docker login ghcr.io -u izumabot --password-stdin
+          make push

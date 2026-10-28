@@ -1,4 +1,13 @@
 # WAL-G
+
+<!-- nucloud:start -->
+[![nucloud](https://github.com/ArmMbedCloud/wal-g/actions/workflows/nucloud.yml/badge.svg?branch=nucloud)](https://github.com/ArmMbedCloud/wal-g/actions/workflows/nucloud.yml)
+[![nucloud branch](https://img.shields.io/badge/branch-nucloud-blue.svg)](https://github.com/IzumaNetworks/nucloud/blob/main/docs/standards.md)
+[![production](https://img.shields.io/badge/production-v0.2.14-lightgrey.svg)](https://github.com/ArmMbedCloud/wal-g/releases/tag/archive/v0.2.14)
+
+Build and deploy: [docs/nucloud.md](docs/nucloud.md).
+<!-- nucloud:end -->
+
 [![Build Status](https://travis-ci.org/wal-g/wal-g.svg?branch=master)](https://travis-ci.org/wal-g/wal-g)
 [![Go Report Card](https://goreportcard.com/badge/github.com/wal-g/wal-g)](https://goreportcard.com/report/github.com/wal-g/wal-g)
 

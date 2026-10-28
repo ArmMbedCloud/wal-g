@@ -143,3 +143,6 @@ unlink_brotli:
 	rm -rf vendor/github.com/google/brotli/*
 	mv tmp/* vendor/github.com/google/brotli/
 	rm -rf tmp/
+
+# nucloud targets (image, deploy, ...): see docs/nucloud.md
+include Makefile.nucloud

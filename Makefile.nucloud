@@ -1,0 +1,79 @@
+# ============================================================================
+# nucloud image repo Makefile. Stamped from IzumaNetworks/nucloud
+# templates/Makefile; identical in every repo. Repo-specific values live in
+# nucloud.env. Change this file in nucloud, then re-stamp.
+# ============================================================================
+
+.DEFAULT_GOAL := help
+
+BUILD_NUMBER     ?= 0
+ENV              ?= k3s-dev
+NUCLOUD_PLATFORM ?= $(HOME)/workspace/izuma/izuma-dm-platform-k3s
+ONLY             ?=
+
+export BUILD_NUMBER ENV NUCLOUD_PLATFORM ONLY
+
+##@ General
+
+.PHONY: help
+help:  ## Display this help message
+	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} \
+		/^[a-zA-Z_-]+:.*?##/ { printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2 } \
+		/^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) }' $(MAKEFILE_LIST)
+
+.PHONY: images
+images:  ## List the images this repo builds and the tag each gets
+	@./makehelp-nucloud.sh images
+
+.PHONY: prereqs
+prereqs:  ## Check docker buildx, syft, kubectl, helmfile and declared build secrets
+	@./makehelp-nucloud.sh prereqs
+
+##@ Build
+
+.PHONY: build
+build: image  ## Alias for image
+
+.PHONY: image
+image:  ## Build every image (ONLY=<name> for one) as <upstream>-nucloud.$(BUILD_NUMBER)
+	@./makehelp-nucloud.sh image
+
+.PHONY: sbom
+sbom:  ## Write sbom-<name>.spdx.json per image with syft
+	@./makehelp-nucloud.sh sbom
+
+##@ Test
+
+.PHONY: test
+test:  ## Run the repo's unit tests inside the Dockerfile's test target, if it has one
+	@./makehelp-nucloud.sh test
+
+.PHONY: smoke
+smoke:  ## Start each image briefly and check it runs
+	@./makehelp-nucloud.sh smoke
+
+##@ Deploy
+
+.PHONY: image-load
+image-load:  ## Import the images into the $(ENV) k3s VM (k3s ctr images import)
+	@./makehelp-nucloud.sh image-load
+
+.PHONY: deploy
+deploy: image image-load  ## Build, import and helmfile-apply each image's release on $(ENV)
+	@./makehelp-nucloud.sh deploy
+
+.PHONY: push
+push:  ## Push -nucloud.<n> tags to ghcr.io/izumanetworks (refuses any other tag)
+	@./makehelp-nucloud.sh push
+
+##@ Development
+
+.PHONY: run
+run: image  ## Run the first image in the foreground (ARGS="..." passes arguments)
+	@./makehelp-nucloud.sh run $(ARGS)
+
+##@ Cleanup
+
+.PHONY: clean
+clean:  ## Remove SBOMs and local build output
+	@rm -f sbom-*.spdx.json
