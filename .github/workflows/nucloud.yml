@@ -39,7 +39,7 @@ jobs:
       - name: Push to GHCR
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/nucloud'
         env:
-          GHCR_TOKEN: ${{ secrets.GHCR_PUSH_TOKEN }}
+          ACCESS_TOKEN: ${{ secrets.ACCESS_TOKEN }}
         run: |
-          echo "$GHCR_TOKEN" | docker login ghcr.io -u izumabot --password-stdin
+          echo "$ACCESS_TOKEN" | docker login ghcr.io -u IzumaBOT --password-stdin
           make -f Makefile.nucloud push
