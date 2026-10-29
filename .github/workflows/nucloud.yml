@@ -1,4 +1,6 @@
 # Stamped from IzumaNetworks/nucloud templates/nucloud.yml; identical in every repo.
+# Calls Makefile.nucloud directly, so a repo Makefile target of the same name
+# (test, clean, help) never adds its own prerequisites.
 name: nucloud
 
 on:
@@ -23,13 +25,13 @@ jobs:
         with:
           ssh-private-key: ${{ secrets.IZUMABOT_SSH_KEY }}
       - name: Build
-        run: make image
+        run: make -f Makefile.nucloud image
       - name: Test
-        run: make test
+        run: make -f Makefile.nucloud test
       - name: Smoke
-        run: make smoke
+        run: make -f Makefile.nucloud smoke
       - name: SBOM
-        run: make sbom
+        run: make -f Makefile.nucloud sbom
       - uses: actions/upload-artifact@v4
         with:
           name: sbom-${{ github.run_number }}
@@ -40,4 +42,4 @@ jobs:
           GHCR_TOKEN: ${{ secrets.GHCR_PUSH_TOKEN }}
         run: |
           echo "$GHCR_TOKEN" | docker login ghcr.io -u izumabot --password-stdin
-          make push
+          make -f Makefile.nucloud push
