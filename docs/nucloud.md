@@ -22,11 +22,13 @@ build as BuildKit secrets, never as layers.
 ## Deploy to a k3s stage
 
 ```sh
-make deploy ENV=k3s-dev  # build, import into the VM, helmfile apply each release
+make deploy ENV=k3s-dev  # build, import into the VM, helm upgrade each release with the new tags
 ```
 
 `deploy` uses the stage definitions in `izuma-dm-platform-k3s`; set
-`NUCLOUD_PLATFORM` if that checkout is elsewhere.
+`NUCLOUD_PLATFORM` if that checkout is elsewhere. Each release keeps its
+current values; only this repo's image tags change. The release each
+image goes to is the last field of its `nucloud.env` entry.
 
 ## Tags
 
