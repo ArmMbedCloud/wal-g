@@ -20,7 +20,12 @@ jobs:
       FA_PRO_TOKEN: ${{ secrets.FA_PRO_TOKEN }}
     steps:
       - uses: actions/checkout@v4
+      # IZUMABOT_SSH_KEY reaches private repos only; a public repo builds without it.
+      - name: Check for the IzumaBOT SSH key
+        id: key
+        run: echo "present=${{ secrets.IZUMABOT_SSH_KEY != '' }}" >> "$GITHUB_OUTPUT"
       - name: SSH agent for private git dependencies
+        if: steps.key.outputs.present == 'true'
         uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.IZUMABOT_SSH_KEY }}
