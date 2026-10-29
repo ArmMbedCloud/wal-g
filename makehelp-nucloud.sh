@@ -11,6 +11,7 @@
 #   SSH=1                         # forward the ssh agent to the build
 #   PLATFORM=linux/amd64
 #   SMOKE_CMD=(...)               # command run by `make smoke`, default: none (image must start)
+#   SMOKE_<name>=(...)            # per-image override; <name> with every non-alphanumeric as _ (SMOKE_iam_policies)
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 [[ -f nucloud.env ]] || { echo "error: nucloud.env missing" >&2; exit 1; }
@@ -58,9 +59,11 @@ i_build() {
 i_sbom() { syft "$7" -o spdx-json > "sbom-${1//\//_}.spdx.json"; say "sbom-${1//\//_}.spdx.json"; }
 
 i_smoke() {
-    local ref=$7 cid
-    if [[ ${#SMOKE_CMD[@]} -gt 0 ]]; then
-        docker run --rm --platform "$PLATFORM" --entrypoint "${SMOKE_CMD[0]}" "$ref" "${SMOKE_CMD[@]:1}"
+    local ref=$7 cid var="SMOKE_${1//[^A-Za-z0-9]/_}"
+    local -a cmd=("${SMOKE_CMD[@]}")
+    if declare -p "$var" >/dev/null 2>&1; then local -n per=$var; cmd=("${per[@]}"); fi
+    if [[ ${#cmd[@]} -gt 0 ]]; then
+        docker run --rm --platform "$PLATFORM" --entrypoint "${cmd[0]}" "$ref" "${cmd[@]:1}"
     else
         cid=$(docker run -d --platform "$PLATFORM" "$ref")
         sleep 8
