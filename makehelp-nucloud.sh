@@ -94,15 +94,20 @@ i_deploy() {
     DEPLOY_SETS+=("$rel|$key=${ref##*:}")
 }
 deploy_apply() {
-    local kc="$NUCLOUD_PLATFORM/$ENV.kubeconfig" rel e args
+    # helm upgrade --reuse-values: changes only this repo's image tags and
+    # keeps every other value, including tags another repo's images set in a
+    # shared release (helmfile apply would reset those to chart defaults).
+    local kc="$NUCLOUD_PLATFORM/$ENV.kubeconfig" rel e args chart
     [[ ${#DEPLOY_SETS[@]} -gt 0 ]] || return 0
     [[ -f "$kc" ]] || die "no kubeconfig at $kc"
     for rel in $(printf '%s\n' "${DEPLOY_SETS[@]}" | cut -d'|' -f1 | sort -u); do
         args=()
         for e in "${DEPLOY_SETS[@]}"; do [[ "${e%%|*}" == "$rel" ]] && args+=(--set "${e#*|}"); done
-        say "helmfile apply $rel on $ENV ${args[*]}"
-        ( cd "$NUCLOUD_PLATFORM" && KUBECONFIG="$kc" KUBE_STAGE="$ENV" REPO_ROOT="$NUCLOUD_PLATFORM" \
-            helmfile -f helmfile.yaml -e "$ENV" -l "name=$rel" apply --skip-deps "${args[@]}" )
+        chart=$(KUBECONFIG="$kc" helm get metadata "$rel" -n default -o json | python3 -c 'import json,sys;print(json.load(sys.stdin)["chart"])')
+        chart=$(find "$NUCLOUD_PLATFORM/charts" -name Chart.yaml -exec grep -l "^name: ${chart}$" {} + | head -1 | xargs dirname)
+        [[ -d "$chart" ]] || die "chart for release $rel not found under $NUCLOUD_PLATFORM/charts"
+        say "helm upgrade $rel on $ENV ${args[*]}"
+        KUBECONFIG="$kc" helm upgrade "$rel" "$chart" -n default --reuse-values "${args[@]}" --wait --timeout 10m
     done
 }
 
