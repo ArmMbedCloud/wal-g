@@ -91,16 +91,25 @@ i_load() {
 
 DEPLOY_SETS=()  # "release|key=tag" collected per image, applied once per release
 i_deploy() {
-    local name=$1 rel=${6%%=*} key=image.tag ref=$7
-    [[ "$6" == *=* ]] && key=${6#*=}
-    [[ "$rel" == "-" || -z "$rel" ]] && { say "$name: no k3s release, skipped"; return; }
-    DEPLOY_SETS+=("$rel|$key=${ref##*:}")
+    # release field: "rel", "rel=values.key", or several joined by commas when
+    # one image is set in more than one release ("mdscore=a.tag,mdsnotification=b.tag")
+    local name=$1 ref=$7 m rel key
+    [[ "$6" == "-" || -z "$6" ]] && { say "$name: no k3s release, skipped"; return; }
+    for m in ${6//,/ }; do
+        rel=${m%%=*} key=image.tag
+        [[ "$m" == *=* ]] && key=${m#*=}
+        DEPLOY_SETS+=("$rel|$key=${ref##*:}")
+    done
 }
 deploy_apply() {
-    # helm upgrade --reuse-values: changes only this repo's image tags and
-    # keeps every other value, including tags another repo's images set in a
-    # shared release (helmfile apply would reset those to chart defaults).
-    local kc="$NUCLOUD_PLATFORM/$ENV.kubeconfig" rel e args chart
+    # helm upgrade with the release's current user-supplied values re-sent as
+    # a file: changes only this repo's image tags and keeps every other value,
+    # including tags another repo's images set in a shared release (helmfile
+    # apply would reset those to chart defaults). Not --reuse-values: helm 4
+    # copies the previous values into the chart record too, and a stage's
+    # values (600 KB of certificates) then overflow the 1 MiB release secret.
+    local kc="$NUCLOUD_PLATFORM/$ENV.kubeconfig" rel e args chart prev
+    prev=$(mktemp) && trap 'rm -f "$prev"' RETURN
     [[ ${#DEPLOY_SETS[@]} -gt 0 ]] || return 0
     [[ -f "$kc" ]] || die "no kubeconfig at $kc"
     for rel in $(printf '%s\n' "${DEPLOY_SETS[@]}" | cut -d'|' -f1 | sort -u); do
@@ -109,8 +118,9 @@ deploy_apply() {
         chart=$(KUBECONFIG="$kc" helm get metadata "$rel" -n default -o json | python3 -c 'import json,sys;print(json.load(sys.stdin)["chart"])')
         chart=$(find "$NUCLOUD_PLATFORM/charts" -name Chart.yaml -exec grep -l "^name: ${chart}$" {} + | head -1 | xargs dirname)
         [[ -d "$chart" ]] || die "chart for release $rel not found under $NUCLOUD_PLATFORM/charts"
+        KUBECONFIG="$kc" helm get values "$rel" -n default -o yaml > "$prev"
         say "helm upgrade $rel on $ENV ${args[*]}"
-        KUBECONFIG="$kc" helm upgrade "$rel" "$chart" -n default --reuse-values "${args[@]}" --wait --timeout 10m
+        KUBECONFIG="$kc" helm upgrade "$rel" "$chart" -n default -f "$prev" "${args[@]}" --wait --timeout 10m
     done
 }
 
