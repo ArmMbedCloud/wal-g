@@ -142,8 +142,8 @@ i_deploy() {
     done
 }
 deploy_wait() {
-    local kc=$1 rel=$2 kind name recreate resources
-    resources=$(kubectl --kubeconfig "$kc" get deploy,sts,ds -n default -o json | python3 -c '
+    local kc=$1 rel=$2 ns=${3:-default} kind name recreate resources
+    resources=$(kubectl --kubeconfig "$kc" get deploy,sts,ds -n "$ns" -o json | python3 -c '
 import json,sys
 rel=sys.argv[1]
 for obj in json.load(sys.stdin)["items"]:
@@ -158,10 +158,10 @@ for obj in json.load(sys.stdin)["items"]:
         [[ -n "$kind" ]] || continue
         if [[ "$recreate" == yes ]]; then
             say "$rel: recreate single-replica host-port deployment $name"
-            kubectl --kubeconfig "$kc" patch deployment "$name" -n default --type merge \
+            kubectl --kubeconfig "$kc" patch deployment "$name" -n "$ns" --type merge \
                 -p '{"spec":{"strategy":{"type":"Recreate","rollingUpdate":null}}}'
         fi
-        kubectl --kubeconfig "$kc" rollout status "$kind/$name" -n default --timeout=10m
+        kubectl --kubeconfig "$kc" rollout status "$kind/$name" -n "$ns" --timeout=10m
     done <<< "$resources"
 }
 deploy_apply() {
@@ -171,20 +171,27 @@ deploy_apply() {
     # apply would reset those to chart defaults). Not --reuse-values: helm 4
     # copies the previous values into the chart record too, and a stage's
     # values (600 KB of certificates) then overflow the 1 MiB release secret.
-    local kc="$NUCLOUD_PLATFORM/$ENV.kubeconfig" rel e args chart prev
+    local kc="$NUCLOUD_PLATFORM/$ENV.kubeconfig" rel e args chart prev ns releases
     prev=$(mktemp) && trap 'rm -f "$prev"' RETURN
     [[ ${#DEPLOY_SETS[@]} -gt 0 ]] || return 0
     [[ -f "$kc" ]] || die "no kubeconfig at $kc"
+    releases=$(KUBECONFIG="$kc" helm list --all-namespaces -o json)
     for rel in $(printf '%s\n' "${DEPLOY_SETS[@]}" | cut -d'|' -f1 | sort -u); do
         args=()
         for e in "${DEPLOY_SETS[@]}"; do [[ "${e%%|*}" == "$rel" ]] && args+=(--set "${e#*|}"); done
-        chart=$(KUBECONFIG="$kc" helm get metadata "$rel" -n default -o json | python3 -c 'import json,sys;print(json.load(sys.stdin)["chart"])')
+        ns=$(printf '%s' "$releases" | python3 -c '
+import json,sys
+matches=[r["namespace"] for r in json.load(sys.stdin) if r["name"]==sys.argv[1]]
+if len(matches)!=1:
+    sys.exit("release must have one installed namespace: "+sys.argv[1])
+print(matches[0])' "$rel")
+        chart=$(KUBECONFIG="$kc" helm get metadata "$rel" -n "$ns" -o json | python3 -c 'import json,sys;print(json.load(sys.stdin)["chart"])')
         chart=$(find "$NUCLOUD_PLATFORM/charts" -name Chart.yaml -exec grep -l "^name: ${chart}$" {} + | head -1 | xargs dirname)
         [[ -d "$chart" ]] || die "chart for release $rel not found under $NUCLOUD_PLATFORM/charts"
-        KUBECONFIG="$kc" helm get values "$rel" -n default -o yaml > "$prev"
+        KUBECONFIG="$kc" helm get values "$rel" -n "$ns" -o yaml > "$prev"
         say "helm upgrade $rel on $ENV ${args[*]}"
-        KUBECONFIG="$kc" helm upgrade "$rel" "$chart" -n default -f "$prev" "${args[@]}" --timeout 10m
-        deploy_wait "$kc" "$rel"
+        KUBECONFIG="$kc" helm upgrade "$rel" "$chart" -n "$ns" -f "$prev" "${args[@]}" --timeout 10m
+        deploy_wait "$kc" "$rel" "$ns"
     done
 }
 
