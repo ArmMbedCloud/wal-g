@@ -10,6 +10,11 @@ on:
     branches: [nucloud]
   workflow_dispatch:
 
+# A newer push to the same ref supersedes an older run that has not finished.
+concurrency:
+  group: nucloud-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   image:
     runs-on: [self-hosted, nucloud]

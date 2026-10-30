@@ -25,7 +25,8 @@ build as BuildKit secrets, never as layers.
 make deploy MACHINE=k3s-cypress  # build, import into the stage's VM, helm upgrade each release with the new tags
 ```
 
-`deploy` uses the stage definitions in `izuma-dm-platform-k3s`; set
+`deploy` uses the stage definitions in the `izuma-dm-platform` checkout
+(`~/workspace/izuma/izuma-dm-platform` on branch `k3s`); set
 `NUCLOUD_PLATFORM` if that checkout is elsewhere. Each release keeps its
 current values; only this repo's image tags change. The release each
 image goes to is the last field of its `nucloud.env` entry.

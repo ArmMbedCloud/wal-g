@@ -20,7 +20,7 @@ SECRETS=() SSH=0 PLATFORM=linux/amd64 SMOKE_CMD=()
 # shellcheck disable=SC1091
 source nucloud.env
 BUILD_NUMBER="${BUILD_NUMBER:-0}" ENV="${MACHINE:-${ENV:-k3s-cypress}}" ONLY="${ONLY:-}"
-NUCLOUD_PLATFORM="${NUCLOUD_PLATFORM:-$HOME/workspace/izuma/izuma-dm-platform-k3s}"
+NUCLOUD_PLATFORM="${NUCLOUD_PLATFORM:-$HOME/workspace/izuma/izuma-dm-platform}"
 GIT_HEAD="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
 
 die() { echo "error: $*" >&2; exit 1; }
