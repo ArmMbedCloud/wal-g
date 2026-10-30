@@ -22,7 +22,7 @@ build as BuildKit secrets, never as layers.
 ## Deploy to a k3s stage
 
 ```sh
-make deploy ENV=k3s-dev  # build, import into the VM, helm upgrade each release with the new tags
+make deploy MACHINE=k3s-cypress  # build, import into the stage's VM, helm upgrade each release with the new tags
 ```
 
 `deploy` uses the stage definitions in `izuma-dm-platform-k3s`; set

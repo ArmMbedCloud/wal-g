@@ -7,7 +7,10 @@
 .DEFAULT_GOAL := help
 
 BUILD_NUMBER     ?= 0
-ENV              ?= k3s-dev
+ENV              ?= k3s-cypress
+# MACHINE names the stage (the platform repo's `make stages`); ENV is its alias
+MACHINE          ?= $(ENV)
+override ENV     := $(MACHINE)
 NUCLOUD_PLATFORM ?= $(HOME)/workspace/izuma/izuma-dm-platform-k3s
 ONLY             ?=
 

@@ -19,7 +19,7 @@ REGISTRY=ghcr.io/izumanetworks
 SECRETS=() SSH=0 PLATFORM=linux/amd64 SMOKE_CMD=()
 # shellcheck disable=SC1091
 source nucloud.env
-BUILD_NUMBER="${BUILD_NUMBER:-0}" ENV="${ENV:-k3s-dev}" ONLY="${ONLY:-}"
+BUILD_NUMBER="${BUILD_NUMBER:-0}" ENV="${MACHINE:-${ENV:-k3s-cypress}}" ONLY="${ONLY:-}"
 NUCLOUD_PLATFORM="${NUCLOUD_PLATFORM:-$HOME/workspace/izuma/izuma-dm-platform-k3s}"
 GIT_HEAD="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
 
@@ -75,12 +75,13 @@ i_smoke() {
     fi
 }
 
-stage_vm() {
-    case "$ENV" in
-        k3s-dev) echo "${INCUS_REMOTE:-cypressLinux}:k3s-dev" ;;
-        k3s-dc)  echo "${INCUS_REMOTE:-D71}:k3s-dc" ;;
-        *) die "ENV=$ENV is not a k3s stage" ;;
-    esac
+stage_vm() { # the stage's incus remote and VM, from the platform repo's stage registry
+    local reg="$NUCLOUD_PLATFORM/scripts/k3s-stage.sh" remote vm
+    [[ -x $reg ]] || die "no stage registry at $reg (set NUCLOUD_PLATFORM to the izuma-dm-platform k3s checkout)"
+    "$reg" require "$ENV" || die "ENV=$ENV is not a k3s stage"
+    remote=$("$reg" show "$ENV" remote); vm=$("$reg" show "$ENV" vm)
+    [[ -n $remote ]] || die "$ENV has no placement in the platform repo's .iz"
+    echo "$remote:$vm"
 }
 
 i_load() {
