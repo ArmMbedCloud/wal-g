@@ -19,9 +19,20 @@ REGISTRY=ghcr.io/izumanetworks
 SECRETS=() SSH=0 PLATFORM=linux/amd64 SMOKE_CMD=()
 # shellcheck disable=SC1091
 source nucloud.env
-BUILD_NUMBER="${BUILD_NUMBER:-0}" ENV="${MACHINE:-${ENV:-k3s-cypress}}" ONLY="${ONLY:-}"
+ENV="${MACHINE:-${ENV:-k3s-cypress}}" ONLY="${ONLY:-}"
 NUCLOUD_PLATFORM="${NUCLOUD_PLATFORM:-$HOME/workspace/izuma/izuma-dm-platform}"
 GIT_HEAD="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
+# CI tags <upstream>-nucloud.<run number>. A local build tags
+# <upstream>-nucloud.dev.<commit>, plus a hash of any uncommitted changes, so
+# every changed tree deploys under a new tag and its pods restart.
+if [[ -n "${BUILD_NUMBER:-}" ]]; then
+    SUFFIX="nucloud.$BUILD_NUMBER"
+else
+    BUILD_NUMBER=0 SUFFIX="nucloud.dev.${GIT_HEAD:0:7}"
+    if [[ -n "$(git status --porcelain -- . ':!sbom-*' 2>/dev/null)" ]]; then
+        SUFFIX+=".$({ git diff HEAD; git ls-files -o --exclude-standard -z -- . ':!sbom-*' | xargs -0 cat; } | git hash-object --stdin | cut -c1-7)"
+    fi
+fi
 
 die() { echo "error: $*" >&2; exit 1; }
 say() { printf '==> %s\n' "$*"; }
@@ -31,7 +42,7 @@ each() { # each <fn>: call fn name tag dockerfile context target release ref
     for e in "${IMAGES[@]}"; do
         IFS='|' read -r name tag df ctx tgt rel <<<"$e"
         [[ -z "$ONLY" || "$ONLY" == "$name" ]] || continue
-        "$1" "$name" "$tag" "$df" "$ctx" "$tgt" "$rel" "$REGISTRY/$name:$tag-nucloud.$BUILD_NUMBER"
+        "$1" "$name" "$tag" "$df" "$ctx" "$tgt" "$rel" "$REGISTRY/$name:$tag-$SUFFIX"
     done
 }
 
@@ -52,7 +63,7 @@ i_build() {
         --build-arg GIT_HEAD="$GIT_HEAD" --build-arg BUILD_NUMBER="$BUILD_NUMBER" \
         --label org.opencontainers.image.revision="$GIT_HEAD" \
         --label org.opencontainers.image.source="https://github.com/$REPO" \
-        --label org.opencontainers.image.version="$2-nucloud.$BUILD_NUMBER" \
+        --label org.opencontainers.image.version="$2-$SUFFIX" \
         -f "$df" -t "$ref" "$ctx"
 }
 
@@ -125,7 +136,11 @@ deploy_apply() {
     done
 }
 
-i_push() { guard_tag "$7"; docker push "$7"; }
+i_push() {
+    guard_tag "$7"
+    [[ "$7" != *-nucloud.dev.* ]] || die "refusing $7: a local build; only CI pushes to GHCR"
+    docker push "$7"
+}
 
 case "${1:-}" in
     images) each i_list ;;
@@ -148,6 +163,6 @@ case "${1:-}" in
     image-load) each i_load ;;
     deploy) each i_deploy; deploy_apply ;;
     push) each i_push ;;
-    run) shift; IFS='|' read -r n t _ <<<"${IMAGES[0]}"; docker run --rm -it "$REGISTRY/$n:$t-nucloud.$BUILD_NUMBER" "$@" ;;
+    run) shift; IFS='|' read -r n t _ <<<"${IMAGES[0]}"; docker run --rm -it "$REGISTRY/$n:$t-$SUFFIX" "$@" ;;
     *) echo "Usage: $0 {images|prereqs|image|sbom|test|smoke|image-load|deploy|push|run}" >&2; exit 1 ;;
 esac

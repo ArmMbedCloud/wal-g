@@ -6,7 +6,8 @@
 
 .DEFAULT_GOAL := help
 
-BUILD_NUMBER     ?= 0
+# Set by CI to the run number; empty for a local build (tag -nucloud.dev.<commit>)
+BUILD_NUMBER     ?=
 ENV              ?= k3s-cypress
 # MACHINE names the stage (the platform repo's `make stages`); ENV is its alias
 MACHINE          ?= $(ENV)
@@ -38,7 +39,7 @@ prereqs:  ## Check docker buildx, syft, kubectl, helmfile and declared build sec
 build: image  ## Alias for image
 
 .PHONY: image
-image:  ## Build every image (ONLY=<name> for one) as <upstream>-nucloud.$(BUILD_NUMBER)
+image:  ## Build every image (ONLY=<name> for one) on the current Docker context
 	@./makehelp-nucloud.sh image
 
 .PHONY: sbom
@@ -66,7 +67,7 @@ deploy: image image-load  ## Build, import and helmfile-apply each image's relea
 	@./makehelp-nucloud.sh deploy
 
 .PHONY: push
-push:  ## Push -nucloud.<n> tags to ghcr.io/izumanetworks (refuses any other tag)
+push:  ## Push CI-built -nucloud.<n> tags to ghcr.io/izumanetworks (refuses any other tag)
 	@./makehelp-nucloud.sh push
 
 ##@ Development

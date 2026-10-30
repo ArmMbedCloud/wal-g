@@ -1,16 +1,14 @@
 # Stamped from IzumaNetworks/nucloud templates/nucloud.yml; identical in every repo.
 # Calls Makefile.nucloud directly, so a repo Makefile target of the same name
 # (test, clean, help) never adds its own prerequisites.
+# Runs only when started by hand: gh workflow run nucloud -R <org/repo> --ref nucloud.
+# Developers build and deploy from their own checkout with make (docs/nucloud.md).
 name: nucloud
 
 on:
-  push:
-    branches: [nucloud]
-  pull_request:
-    branches: [nucloud]
   workflow_dispatch:
 
-# A newer push to the same ref supersedes an older run that has not finished.
+# A newer run on the same ref supersedes an older run that has not finished.
 concurrency:
   group: nucloud-${{ github.ref }}
   cancel-in-progress: true
@@ -47,9 +45,15 @@ jobs:
           name: sbom-${{ github.run_number }}
           path: sbom-*.spdx.json
       - name: Push to GHCR
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/nucloud'
+        if: github.ref == 'refs/heads/nucloud'
         env:
           ACCESS_TOKEN: ${{ secrets.ACCESS_TOKEN }}
         run: |
           echo "$ACCESS_TOKEN" | docker login ghcr.io -u IzumaBOT --password-stdin
           make -f Makefile.nucloud push
+      # The runner builds any repo next: leave none of this job's images or build cache behind.
+      - name: Clean up
+        if: always()
+        run: |
+          make -f Makefile.nucloud images | awk '{print $2}' | xargs -r docker image rm -f
+          docker builder prune -af
