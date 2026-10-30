@@ -35,11 +35,8 @@ prereqs:  ## Check docker buildx, syft, kubectl, helmfile and declared build sec
 
 ##@ Build
 
-# Included repo Makefiles retain their native all target.
-ifeq ($(words $(MAKEFILE_LIST)),1)
 .PHONY: all
 all: build  ## Alias for build — build every image
-endif
 
 .PHONY: build
 build: image  ## Build every image on the current Docker context

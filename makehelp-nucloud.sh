@@ -142,26 +142,27 @@ i_deploy() {
     done
 }
 deploy_wait() {
-    local kc=$1 rel=$2 ns=${3:-default} kind name recreate resources
-    resources=$(kubectl --kubeconfig "$kc" get deploy,sts,ds -n "$ns" -o json | python3 -c '
+    local kc=$1 rel=$2 ns=${3:-default} workload_ns kind name recreate resources
+    resources=$(kubectl --kubeconfig "$kc" get deploy,sts,ds --all-namespaces -o json | python3 -c '
 import json,sys
-rel=sys.argv[1]
+rel,release_ns=sys.argv[1:3]
 for obj in json.load(sys.stdin)["items"]:
-    if obj["metadata"].get("annotations",{}).get("meta.helm.sh/release-name") != rel:
+    annotations=obj["metadata"].get("annotations",{})
+    if annotations.get("meta.helm.sh/release-name") != rel or annotations.get("meta.helm.sh/release-namespace") != release_ns:
         continue
     spec=obj["spec"]; pod=spec["template"]["spec"]
     ports=pod.get("hostNetwork",False) or any(p.get("hostPort",0) for c in pod.get("containers",[]) for p in c.get("ports",[]))
     recreate=obj["kind"]=="Deployment" and spec.get("replicas",1)==1 and ports
-    print(obj["kind"].lower(),obj["metadata"]["name"],"yes" if recreate else "no")
-' "$rel")
-    while read -r kind name recreate; do
+    print(obj["metadata"]["namespace"],obj["kind"].lower(),obj["metadata"]["name"],"yes" if recreate else "no")
+' "$rel" "$ns")
+    while read -r workload_ns kind name recreate; do
         [[ -n "$kind" ]] || continue
         if [[ "$recreate" == yes ]]; then
             say "$rel: recreate single-replica host-port deployment $name"
-            kubectl --kubeconfig "$kc" patch deployment "$name" -n "$ns" --type merge \
+            kubectl --kubeconfig "$kc" patch deployment "$name" -n "$workload_ns" --type merge \
                 -p '{"spec":{"strategy":{"type":"Recreate","rollingUpdate":null}}}'
         fi
-        kubectl --kubeconfig "$kc" rollout status "$kind/$name" -n "$ns" --timeout=10m
+        kubectl --kubeconfig "$kc" rollout status "$kind/$name" -n "$workload_ns" --timeout=10m
     done <<< "$resources"
 }
 deploy_apply() {
