@@ -1,6 +1,6 @@
 # Build fixes
 
-Source is unchanged from `v0.2.14`. The build differs from the upstream `Makefile` `deps` and `pg_build` targets as follows.
+The source version is `v0.2.14`. Docker supplies the toolchain and dependencies for the build.
 
 | Error | Change | File |
 |---|---|---|
@@ -8,4 +8,8 @@ Source is unchanged from `v0.2.14`. The build differs from the upstream `Makefil
 | `go build` stamps `GitRevision` and `WalgVersion` from `git`, which the build context lacks. | The build passes `d372cbd` and `v0.2.14` as build arguments. | `Dockerfile` |
 | `golang:1.11-stretch` apt sources return 404. | The build stage points apt at `archive.debian.org`. | `Dockerfile` |
 
-The rebuilt binary reports `wal-g version v0.2.14 d372cbd ... PostgreSQL`, as in `platform/stolon:0.16.0-pg12.8-5`.
+## Nucloud commands
+
+| Setting | Reason | File |
+|---|---|---|
+| Nucloud targets use an isolated Makefile branch | `make build` and `make deploy` use Docker without invoking native host prerequisites; other explicit targets retain their native rules. | `Makefile` |

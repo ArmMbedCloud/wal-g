@@ -1,3 +1,8 @@
+# nucloud entrypoint: isolated Docker targets
+NUCLOUD_TARGETS := help prereqs images build image sbom test smoke image-load deploy push run clean
+ifeq ($(strip $(filter-out $(NUCLOUD_TARGETS),$(MAKECMDGOALS))),)
+include Makefile.nucloud
+else
 MAIN_PG_PATH := main/pg
 MAIN_MYSQL_PATH := main/mysql
 MAIN_REDIS_PATH := main/redis
@@ -143,6 +148,4 @@ unlink_brotli:
 	rm -rf vendor/github.com/google/brotli/*
 	mv tmp/* vendor/github.com/google/brotli/
 	rm -rf tmp/
-
-# nucloud targets (image, deploy, ...): see docs/nucloud.md
-include Makefile.nucloud
+endif

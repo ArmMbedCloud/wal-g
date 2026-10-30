@@ -97,13 +97,36 @@ stage_vm() { # the stage's incus remote and VM, from the platform repo's stage r
 
 LOAD_REFS=()
 i_load_ref() { LOAD_REFS+=("$7"); }
+save_images() {
+    local endpoint target port socket command wrapped
+    endpoint=$(docker context inspect "$(docker context show)" --format '{{.Endpoints.docker.Host}}')
+    if [[ -z "${DOCKER_HOST:-}" && "$endpoint" == ssh://* ]]; then
+        read -r target port socket < <(python3 - "$endpoint" <<'PYURL'
+import sys
+from urllib.parse import unquote, urlparse
+u = urlparse(sys.argv[1])
+target = (unquote(u.username) + '@' if u.username else '') + u.hostname
+print(target, u.port or 22, unquote(u.path))
+PYURL
+        )
+        local -a args=(docker)
+        [[ -z "$socket" || "$socket" == / ]] || args+=(--host "unix://$socket")
+        args+=(image save "${LOAD_REFS[@]}")
+        printf -v command '%q ' "${args[@]}"
+        printf -v wrapped 'bash -o pipefail -c %q' "$command | gzip -1"
+        # Compress beside the engine before the SSH transfer to this checkout.
+        ssh -o BatchMode=yes -p "$port" "$target" "$wrapped"
+    else
+        docker save "${LOAD_REFS[@]}" | gzip -1
+    fi
+}
 load_images() {
     local vm
     each i_load_ref
     [[ ${#LOAD_REFS[@]} -gt 0 ]] || die "no images selected for import"
     vm=$(stage_vm)
     say "import ${#LOAD_REFS[@]} image(s) into $vm"
-    docker save "${LOAD_REFS[@]}" | gzip -1 | incus exec "$vm" -- k3s ctr images import -
+    save_images | incus exec "$vm" -- k3s ctr images import -
 }
 
 DEPLOY_SETS=()  # "release|key=tag" collected per image, applied once per release
@@ -117,6 +140,29 @@ i_deploy() {
         [[ "$m" == *=* ]] && key=${m#*=}
         DEPLOY_SETS+=("$rel|$key=${ref##*:}")
     done
+}
+deploy_wait() {
+    local kc=$1 rel=$2 kind name recreate resources
+    resources=$(kubectl --kubeconfig "$kc" get deploy,sts,ds -n default -o json | python3 -c '
+import json,sys
+rel=sys.argv[1]
+for obj in json.load(sys.stdin)["items"]:
+    if obj["metadata"].get("annotations",{}).get("meta.helm.sh/release-name") != rel:
+        continue
+    spec=obj["spec"]; pod=spec["template"]["spec"]
+    ports=pod.get("hostNetwork",False) or any(p.get("hostPort",0) for c in pod.get("containers",[]) for p in c.get("ports",[]))
+    recreate=obj["kind"]=="Deployment" and spec.get("replicas",1)==1 and ports
+    print(obj["kind"].lower(),obj["metadata"]["name"],"yes" if recreate else "no")
+' "$rel")
+    while read -r kind name recreate; do
+        [[ -n "$kind" ]] || continue
+        if [[ "$recreate" == yes ]]; then
+            say "$rel: recreate single-replica host-port deployment $name"
+            kubectl --kubeconfig "$kc" patch deployment "$name" -n default --type merge \
+                -p '{"spec":{"strategy":{"type":"Recreate","rollingUpdate":null}}}'
+        fi
+        kubectl --kubeconfig "$kc" rollout status "$kind/$name" -n default --timeout=10m
+    done <<< "$resources"
 }
 deploy_apply() {
     # helm upgrade with the release's current user-supplied values re-sent as
@@ -137,7 +183,8 @@ deploy_apply() {
         [[ -d "$chart" ]] || die "chart for release $rel not found under $NUCLOUD_PLATFORM/charts"
         KUBECONFIG="$kc" helm get values "$rel" -n default -o yaml > "$prev"
         say "helm upgrade $rel on $ENV ${args[*]}"
-        KUBECONFIG="$kc" helm upgrade "$rel" "$chart" -n default -f "$prev" "${args[@]}" --wait --timeout 10m
+        KUBECONFIG="$kc" helm upgrade "$rel" "$chart" -n default -f "$prev" "${args[@]}" --timeout 10m
+        deploy_wait "$kc" "$rel"
     done
 }
 

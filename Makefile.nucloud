@@ -42,7 +42,8 @@ all: build  ## Alias for build — build every image
 endif
 
 .PHONY: build
-build: image  ## Alias for image
+build: image  ## Build every image on the current Docker context
+	@:
 
 .PHONY: image
 image:  ## Build every image (ONLY=<name> for one) on the current Docker context
