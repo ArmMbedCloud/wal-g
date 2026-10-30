@@ -19,8 +19,8 @@ make build ONLY=<name>   # one image
 
 Builds run entirely in Docker for `linux/amd64` on the current Docker
 context. To build on a remote Docker host, select it with
-`DOCKER_CONTEXT=<name>` in your shell. `make all` and `make image` also
-build the images. Nucloud build and deploy targets run independently of
+`DOCKER_CONTEXT=<name>` in your shell. `make image` also builds the
+images. Nucloud build and deploy targets run independently of
 the repository's native host build prerequisites. Build
 secrets named in `nucloud.env` (`SECRETS`) come from environment variables
 and reach the build as BuildKit secrets, never as layers. A repo with
