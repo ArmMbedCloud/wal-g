@@ -35,6 +35,12 @@ prereqs:  ## Check docker buildx, syft, kubectl, helmfile and declared build sec
 
 ##@ Build
 
+# Included repo Makefiles retain their native all target.
+ifeq ($(words $(MAKEFILE_LIST)),1)
+.PHONY: all
+all: build  ## Alias for build — build every image
+endif
+
 .PHONY: build
 build: image  ## Alias for image
 
@@ -73,7 +79,7 @@ push:  ## Push CI-built -nucloud.<n> tags to ghcr.io/izumanetworks (refuses any 
 ##@ Development
 
 .PHONY: run
-run: image  ## Run the first image in the foreground (ARGS="..." passes arguments)
+run: build  ## Run the first image in the foreground (ARGS="..." passes arguments)
 	@./makehelp-nucloud.sh run $(ARGS)
 
 ##@ Cleanup

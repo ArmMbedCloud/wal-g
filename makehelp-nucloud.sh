@@ -95,10 +95,15 @@ stage_vm() { # the stage's incus remote and VM, from the platform repo's stage r
     echo "$remote:$vm"
 }
 
-i_load() {
-    local ref=$7 vm; vm=$(stage_vm)
-    say "import $ref into $vm"
-    docker save "$ref" | incus exec "$vm" -- k3s ctr images import -
+LOAD_REFS=()
+i_load_ref() { LOAD_REFS+=("$7"); }
+load_images() {
+    local vm
+    each i_load_ref
+    [[ ${#LOAD_REFS[@]} -gt 0 ]] || die "no images selected for import"
+    vm=$(stage_vm)
+    say "import ${#LOAD_REFS[@]} image(s) into $vm"
+    docker save "${LOAD_REFS[@]}" | gzip -1 | incus exec "$vm" -- k3s ctr images import -
 }
 
 DEPLOY_SETS=()  # "release|key=tag" collected per image, applied once per release
@@ -160,7 +165,7 @@ case "${1:-}" in
             say "no test stage in $df"
         fi ;;
     smoke) each i_smoke ;;
-    image-load) each i_load ;;
+    image-load) load_images ;;
     deploy) each i_deploy; deploy_apply ;;
     push) each i_push ;;
     run) shift; IFS='|' read -r n t _ <<<"${IMAGES[0]}"; docker run --rm -it "$REGISTRY/$n:$t-$SUFFIX" "$@" ;;
