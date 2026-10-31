@@ -33,6 +33,21 @@ make deploy MACHINE=k3s-trav
 make deploy MACHINE=k3s-cypress
 ```
 
+`make deploy` builds the images before importing and applying them. Use
+`make deploy-only` to import and apply images that already exist on the
+selected Docker context:
+
+```sh
+make deploy-only MACHINE=k3s-ed IMAGE_SUFFIX=nucloud.dev.abcdef0
+```
+
+`IMAGE_SUFFIX` selects the exact suffix from a completed build, including
+any dirty-tree hash. Omit it to select the current checkout's image tags.
+Every selected image must exist and match the configured platform before
+any import or Helm upgrade starts. Missing images cause an error; this
+command never builds, pulls or pushes images. `make deploy` rejects
+`IMAGE_SUFFIX` so a build cannot overwrite an earlier build's selected tag.
+
 `deploy` uses the stage definitions in the `izuma-dm-platform` checkout
 (`~/workspace/izuma/izuma-dm-platform` on branch `k3s`); set
 `NUCLOUD_PLATFORM` if that checkout is elsewhere. Each release keeps its

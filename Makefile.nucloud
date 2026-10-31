@@ -8,6 +8,7 @@
 
 # Set by CI to the run number; empty for a local build (tag -nucloud.dev.<commit>)
 BUILD_NUMBER     ?=
+IMAGE_SUFFIX     ?=
 ENV              ?= k3s-cypress
 # MACHINE names the stage (the platform repo's `make stages`); ENV is its alias
 MACHINE          ?= $(ENV)
@@ -15,7 +16,7 @@ override ENV     := $(MACHINE)
 NUCLOUD_PLATFORM ?= $(HOME)/workspace/izuma/izuma-dm-platform
 ONLY             ?=
 
-export BUILD_NUMBER ENV NUCLOUD_PLATFORM ONLY
+export BUILD_NUMBER IMAGE_SUFFIX ENV NUCLOUD_PLATFORM ONLY
 
 ##@ General
 
@@ -67,8 +68,12 @@ image-load:  ## Import the images into the $(ENV) k3s VM (k3s ctr images import)
 	@./makehelp-nucloud.sh image-load
 
 .PHONY: deploy
-deploy: image image-load  ## Build, import and helmfile-apply each image's release on $(ENV)
-	@./makehelp-nucloud.sh deploy
+deploy: image  ## Build images, then import and upgrade their releases on $(ENV)
+	@./makehelp-nucloud.sh deploy-only
+
+.PHONY: deploy-only
+deploy-only:  ## Import and deploy existing images; IMAGE_SUFFIX= selects an earlier build
+	@./makehelp-nucloud.sh deploy-only
 
 .PHONY: push
 push:  ## Push CI-built -nucloud.<n> tags to ghcr.io/izumanetworks (refuses any other tag)

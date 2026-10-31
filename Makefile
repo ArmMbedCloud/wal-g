@@ -1,5 +1,5 @@
 # nucloud entrypoint: isolated Docker targets
-NUCLOUD_TARGETS := help prereqs images build image sbom test smoke image-load deploy push run clean
+NUCLOUD_TARGETS := help prereqs images build image sbom test smoke image-load deploy deploy-only push run clean
 ifeq ($(strip $(filter-out $(NUCLOUD_TARGETS),$(MAKECMDGOALS))),)
 include Makefile.nucloud
 else

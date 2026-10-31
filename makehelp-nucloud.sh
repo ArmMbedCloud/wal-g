@@ -37,6 +37,14 @@ fi
 die() { echo "error: $*" >&2; exit 1; }
 say() { printf '==> %s\n' "$*"; }
 
+if [[ -n "${IMAGE_SUFFIX:-}" ]]; then
+    [[ "$IMAGE_SUFFIX" =~ ^nucloud\.(dev\.[a-f0-9]{7,40}(\.[a-f0-9]{7})?|[0-9]+)$ ]] || die "invalid IMAGE_SUFFIX=$IMAGE_SUFFIX"
+    case "${1:-}" in
+        images|image-load|deploy-only|deploy|sbom|smoke) SUFFIX=$IMAGE_SUFFIX ;;
+        *) die "IMAGE_SUFFIX selects existing images; omit it for builds and pushes" ;;
+    esac
+fi
+
 each() { # each <fn>: call fn name tag dockerfile context target release ref
     local e name tag df ctx tgt rel
     for e in "${IMAGES[@]}"; do
@@ -122,8 +130,15 @@ PYURL
 }
 load_images() {
     local vm
+    LOAD_REFS=()
     each i_load_ref
     [[ ${#LOAD_REFS[@]} -gt 0 ]] || die "no images selected for import"
+    local ref actual
+    for ref in "${LOAD_REFS[@]}"; do
+        actual=$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$ref") || \
+            die "missing existing image $ref; build first or set IMAGE_SUFFIX= to a completed build"
+        [[ "$actual" == "$PLATFORM" ]] || die "$ref has platform $actual; expected $PLATFORM"
+    done
     vm=$(stage_vm)
     say "import ${#LOAD_REFS[@]} image(s) into $vm"
     save_images | incus exec "$vm" -- k3s ctr images import -
@@ -221,8 +236,9 @@ case "${1:-}" in
         fi ;;
     smoke) each i_smoke ;;
     image-load) load_images ;;
+    deploy-only) load_images; each i_deploy; deploy_apply ;;
     deploy) each i_deploy; deploy_apply ;;
     push) each i_push ;;
     run) shift; IFS='|' read -r n t _ <<<"${IMAGES[0]}"; docker run --rm -it "$REGISTRY/$n:$t-$SUFFIX" "$@" ;;
-    *) echo "Usage: $0 {images|prereqs|image|sbom|test|smoke|image-load|deploy|push|run}" >&2; exit 1 ;;
+    *) echo "Usage: $0 {images|prereqs|image|sbom|test|smoke|image-load|deploy-only|deploy|push|run}" >&2; exit 1 ;;
 esac
