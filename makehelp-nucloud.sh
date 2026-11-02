@@ -150,7 +150,12 @@ load_images() {
     done
     vm=$(stage_vm)
     say "import ${#LOAD_REFS[@]} image(s) into $vm"
-    save_images | incus exec "$vm" -- k3s ctr images import -
+    local try
+    for try in 1 2; do
+        if save_images | incus exec "$vm" -- k3s ctr images import -; then break; fi
+        [[ $try == 1 ]] || die "image import into $vm failed twice"
+        say "import into $vm failed; retrying once"
+    done
 }
 
 DEPLOY_SETS=()  # "release|key=tag" collected per image, applied once per release

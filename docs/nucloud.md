@@ -48,9 +48,17 @@ any import or Helm upgrade starts. Missing images cause an error; this
 command never builds, pulls or pushes images. `make deploy` rejects
 `IMAGE_SUFFIX` so a build cannot overwrite an earlier build's selected tag.
 
-`deploy` uses the stage definitions in the `izuma-dm-platform` checkout
-(`~/workspace/izuma/izuma-dm-platform` on branch `k3s`); set
-`NUCLOUD_PLATFORM` if that checkout is elsewhere. Each release keeps its
+`deploy` finds the stage's incus remote and VM in `.iz`, which every repo
+carries. `.iz` defines `k3s-ed`, `k3s-trav` and `k3s-golden` on the `D71`
+remote. `.izlocal` beside it holds private machines, such as `k3s-cypress`
+on the `cypressLinux` remote, is never committed, and is created once from
+the template and left as you edit it. izmachine reads `~/.config/izmachine/global.iz`,
+then `.iz`, then `.izlocal`; a later file replaces an earlier definition of
+the same stage whole. A stage that no file defines, or a checkout without
+izmachine on `PATH`, falls back to the stage registry in the
+`izuma-dm-platform` checkout (`~/workspace/izuma/izuma-dm-platform` on
+branch `k3s`). The Helm upgrade always takes the stage's kubeconfig from
+that checkout; set `NUCLOUD_PLATFORM` if it is elsewhere. Each release keeps its
 current values and namespace; the upgrade sets this repo's image tags
 and waits for its workloads across their namespaces. The release each
 image goes to is the last field of its `nucloud.env` entry.
@@ -70,7 +78,7 @@ runs.
 `.github/workflows/nucloud.yml` builds source changes on pull requests
 into `nucloud` and pushes to `nucloud`. Changes confined to `docs/`,
 README files, Markdown, `Makefile`, `Makefile.nucloud`,
-`makehelp-nucloud.sh`, `.dockerignore` and the workflow file skip CI.
+`makehelp-nucloud.sh`, `.dockerignore`, `.iz`, `.izlocal`, `.gitignore` and the workflow file skip CI.
 `Dockerfile`, `nucloud.env` and code changes trigger it.
 
 Force a rebuild with `gh workflow run nucloud -R <org/repo> --ref nucloud`.
