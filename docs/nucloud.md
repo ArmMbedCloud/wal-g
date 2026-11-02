@@ -11,7 +11,6 @@ the stages in [nucloud setup](https://github.com/IzumaNetworks/nucloud/blob/main
 
 ```sh
 export DOCKER_CONTEXT=echo
-export NUCLOUD_PLATFORM="$HOME/workspace/izuma/izuma-dm-platform-k3s"
 make images              # images and tags
 make build               # build every image inside Docker
 make build ONLY=<name>   # one image
@@ -54,16 +53,28 @@ remote. `.izlocal` beside it holds private machines, such as `k3s-cypress`
 on the `cypressLinux` remote, is never committed, and is created once from
 the template and left as you edit it. izmachine reads `~/.config/izmachine/global.iz`,
 then `.iz`, then `.izlocal`; a later file replaces an earlier definition of
-the same stage whole. A stage that no file defines, or a checkout without
-izmachine on `PATH`, falls back to the stage registry in the
-`izuma-dm-platform` checkout (`~/workspace/izuma/izuma-dm-platform` on
-branch `k3s`). The Helm upgrade always takes the stage's kubeconfig from
-that checkout; set `NUCLOUD_PLATFORM` if it is elsewhere. Each release keeps its
-current values and namespace; the upgrade sets this repo's image tags
-and waits for its workloads across their namespaces. The release each
-image goes to is the last field of its `nucloud.env` entry.
-The commands above select the independent platform checkout containing
-the merged charts and private kubeconfigs.
+the same stage whole. A stage that no file defines, a checkout without
+`.iz` and a machine without izmachine on `PATH` each stop the run before
+anything is built or imported.
+
+The stage's kubeconfig comes from its VM: izmachine reads
+`/etc/rancher/k3s/k3s.yaml` there and `deploy` points it at the VM's
+address. The kubeconfig lives in a private temporary file for the run and is
+never written into the repo. The chart of each release comes from the
+release's newest record in the cluster, and the upgrade keeps the release's
+current values and namespace, sets this repo's image tags and waits for its
+workloads across their namespaces. A release that renders vendored
+subcharts, which Helm does not keep in its record, takes its chart from an
+`izuma-dm-platform` checkout: `NUCLOUD_PLATFORM`, default
+`~/workspace/izuma/izuma-dm-platform`. `paas` and `zookeeper-nucloud` have
+such releases. The release each image goes to is the last field of its
+`nucloud.env` entry.
+
+```sh
+make stage-check MACHINE=k3s-ed   # the stage VM answers and its kubeconfig can be fetched
+make kubeconfig MACHINE=k3s-ed    # print the stage's kubeconfig; nothing is written
+make running MACHINE=k3s-ed       # this repo's releases and the image each workload runs
+```
 
 ## Tags
 

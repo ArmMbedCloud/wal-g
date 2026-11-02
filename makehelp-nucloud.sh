@@ -20,7 +20,6 @@ SECRETS=() SSH=0 PLATFORM=linux/amd64 SMOKE_CMD=()
 # shellcheck disable=SC1091
 source nucloud.env
 ENV="${MACHINE:-${ENV:-k3s-cypress}}" ONLY="${ONLY:-}"
-NUCLOUD_PLATFORM="${NUCLOUD_PLATFORM:-$HOME/workspace/izuma/izuma-dm-platform}"
 GIT_HEAD="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
 # CI tags <upstream>-nucloud.<run number>. A local build tags
 # <upstream>-nucloud.dev.<commit>, plus a hash of any uncommitted changes, so
@@ -94,22 +93,98 @@ i_smoke() {
     fi
 }
 
-stage_vm() { # the stage's incus remote and VM: ./.iz and .izlocal through izmachine, else the platform stage registry
-    local reg="$NUCLOUD_PLATFORM/scripts/k3s-stage.sh" remote vm hit
-    if [[ -f .iz ]] && command -v izmachine >/dev/null; then
-        hit=$(izmachine info "$ENV" --format json -f .iz 2>/dev/null | python3 -c '
+stage_vm() { # the stage's incus remote and VM, "remote:guest": ./.iz and .izlocal through izmachine
+    local hit
+    command -v izmachine >/dev/null || die "izmachine is not on PATH; stage $ENV is resolved from .iz through it"
+    [[ -f .iz ]] || die "no .iz in $PWD; stages are defined in .iz (make rollout in nucloud installs it)"
+    hit=$(izmachine info "$ENV" --format json -f .iz 2>/dev/null | python3 -c '
 import json, sys
 want, raw = sys.argv[1], sys.stdin.read()
 for g in (json.loads(raw).get("guests", []) if raw.strip() else []):
     if g.get("definition") == want and g.get("remote"):
         print(g["remote"] + ":" + g.get("guest", want)); break' "$ENV") || hit=
-        [[ -z $hit ]] || { echo "$hit"; return; }
-    fi
-    [[ -x $reg ]] || die "no stage registry at $reg (set NUCLOUD_PLATFORM to the izuma-dm-platform k3s checkout)"
-    "$reg" require "$ENV" || die "ENV=$ENV is not a k3s stage"
-    remote=$("$reg" show "$ENV" remote); vm=$("$reg" show "$ENV" vm)
-    [[ -n $remote ]] || die "$ENV has no placement in the platform repo's .iz"
-    echo "$remote:$vm"
+    [[ -n $hit ]] || die "stage $ENV is not defined in .iz or .izlocal"
+    echo "$hit"
+}
+
+WORK=
+work_dir() { [[ -n $WORK ]] || { WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT; }; }
+
+STAGE_KC=
+stage_kubeconfig() { # fetch the stage's admin kubeconfig from its VM into $STAGE_KC (mode 600, removed on exit)
+    local hit remote guest ip out
+    [[ -z $STAGE_KC ]] || return 0
+    hit=$(stage_vm); remote=${hit%%:*}; guest=${hit#*:}
+    work_dir
+    # the VM's own guest.ip is a CNI address on k3s; the default route's source is the LAN address
+    ip=$(izmachine direct run "$guest" --provider incus --remote "$remote" --format json -- ip -4 route get 1.1.1.1 | python3 -c '
+import json, re, sys
+m = re.search(r"\bsrc (\d+\.\d+\.\d+\.\d+)", json.load(sys.stdin).get("stdout", ""))
+print(m.group(1) if m else "")') || ip=
+    [[ -n $ip ]] || die "cannot read $guest's address on $remote; is the VM running? (izmachine list)"
+    out="$WORK/$ENV.kubeconfig"
+    izmachine direct run "$guest" --provider incus --remote "$remote" --format json -- cat /etc/rancher/k3s/k3s.yaml | python3 -c '
+import json, re, sys
+ip, stage = sys.argv[1:3]
+d = json.load(sys.stdin)
+if d.get("exit_code") != 0 or not d.get("stdout", "").startswith("apiVersion"):
+    sys.exit("k3s.yaml not readable: " + d.get("stderr", "")[:200])
+t = d["stdout"].replace("https://127.0.0.1:", "https://" + ip + ":")
+t = re.sub(r"(?m)^(\s*(?:- )?(?:name|cluster|user)|current-context): default$", lambda m: m.group(1) + ": " + stage, t)
+sys.stdout.write(t)' "$ip" "$ENV" > "$out" || die "cannot fetch $ENV's kubeconfig from $guest on $remote"
+    chmod 600 "$out"
+    STAGE_KC=$out
+}
+
+release_chart() { # release_chart <kubeconfig> <release> <namespace> <dir>: write the installed chart from its newest release record
+    local rec="$WORK/$2.release.json" rc=0
+    kubectl --kubeconfig "$1" get secret -n "$3" -l "owner=helm,name=$2" -o json > "$rec" || die "cannot read release $2 on $ENV"
+    python3 -I - "$rec" "$4" <<'PYCHART' || rc=$?
+import base64, gzip, json, os, sys
+rec, dest = sys.argv[1:3]
+items = json.load(open(rec))["items"]
+if not items:
+    sys.exit("no release record")
+best = max(items, key=lambda i: int(i["metadata"]["labels"]["version"]))
+raw = base64.b64decode(base64.b64decode(best["data"]["release"]))
+if raw[:2] == b"\x1f\x8b":
+    raw = gzip.decompress(raw)
+rel = json.loads(raw)
+chart = rel["chart"]
+if ("# Source: %s/charts/" % chart["metadata"]["name"]) in rel.get("manifest", "") and not chart.get("dependencies"):
+    sys.exit(3)  # the release rendered vendored subcharts, which Helm does not keep in its record
+
+def put(root, rel, data):
+    path = os.path.normpath(os.path.join(root, rel))
+    if os.path.isabs(rel) or not path.startswith(os.path.normpath(root) + os.sep):
+        sys.exit("unsafe path in release: " + rel)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    open(path, "wb").write(data)
+
+def write(c, root):
+    os.makedirs(root, exist_ok=True)
+    meta = dict(c["metadata"])
+    present = {d["metadata"]["name"] for d in c.get("dependencies") or []}
+    if meta.get("dependencies"):  # a disabled subchart is absent from the record but still listed in Chart.yaml
+        meta["dependencies"] = [r for r in meta["dependencies"] if (r.get("alias") or r["name"]) in present]
+    put(root, "Chart.yaml", json.dumps(meta).encode())
+    put(root, "values.yaml", json.dumps(c.get("values") or {}).encode())
+    for f in (c.get("templates") or []) + (c.get("files") or []):
+        put(root, f["name"], base64.b64decode(f.get("data") or ""))
+    if c.get("schema"):
+        put(root, "values.schema.json", base64.b64decode(c["schema"]))
+    for d in c.get("dependencies") or []:
+        write(d, os.path.join(root, "charts", d["metadata"]["name"]))
+
+write(chart, dest)
+PYCHART
+    case $rc in 0) ;; 3) return 3 ;; *) die "cannot recover the chart of release $2" ;; esac
+}
+platform_chart() { # platform_chart <release> <chart name>: the chart directory in an izuma-dm-platform checkout
+    local root="${NUCLOUD_PLATFORM:-$HOME/workspace/izuma/izuma-dm-platform}" dir
+    dir=$(find "$root/charts" -name Chart.yaml -exec grep -l "^name: $2$" {} + 2>/dev/null | head -1 | xargs dirname 2>/dev/null) || dir=
+    [[ -d "$dir" ]] || die "release $1 renders vendored subcharts that its cluster record does not keep; set NUCLOUD_PLATFORM to an izuma-dm-platform checkout holding chart $2"
+    echo "$dir"
 }
 
 LOAD_REFS=()
@@ -201,10 +276,10 @@ deploy_apply() {
     # apply would reset those to chart defaults). Not --reuse-values: helm 4
     # copies the previous values into the chart record too, and a stage's
     # values (600 KB of certificates) then overflow the 1 MiB release secret.
-    local kc="$NUCLOUD_PLATFORM/$ENV.kubeconfig" rel e args chart prev ns releases
-    prev=$(mktemp) && trap 'rm -f "$prev"' RETURN
+    local kc rel e args chart prev ns releases
     [[ ${#DEPLOY_SETS[@]} -gt 0 ]] || return 0
-    [[ -f "$kc" ]] || die "no kubeconfig at $kc"
+    stage_kubeconfig; kc=$STAGE_KC
+    prev="$WORK/values.yaml"
     releases=$(KUBECONFIG="$kc" helm list --all-namespaces -o json)
     for rel in $(printf '%s\n' "${DEPLOY_SETS[@]}" | cut -d'|' -f1 | sort -u); do
         args=()
@@ -215,13 +290,45 @@ matches=[r["namespace"] for r in json.load(sys.stdin) if r["name"]==sys.argv[1]]
 if len(matches)!=1:
     sys.exit("release must have one installed namespace: "+sys.argv[1])
 print(matches[0])' "$rel")
-        chart=$(KUBECONFIG="$kc" helm get metadata "$rel" -n "$ns" -o json | python3 -c 'import json,sys;print(json.load(sys.stdin)["chart"])')
-        chart=$(find "$NUCLOUD_PLATFORM/charts" -name Chart.yaml -exec grep -l "^name: ${chart}$" {} + | head -1 | xargs dirname)
-        [[ -d "$chart" ]] || die "chart for release $rel not found under $NUCLOUD_PLATFORM/charts"
+        chart="$WORK/chart-$rel"
+        if ! release_chart "$kc" "$rel" "$ns" "$chart"; then
+            chart=$(KUBECONFIG="$kc" helm get metadata "$rel" -n "$ns" -o json | python3 -c 'import json,sys;print(json.load(sys.stdin)["chart"])')
+            chart=$(platform_chart "$rel" "$chart")
+        fi
         KUBECONFIG="$kc" helm get values "$rel" -n "$ns" -o yaml > "$prev"
         say "helm upgrade $rel on $ENV ${args[*]}"
         KUBECONFIG="$kc" helm upgrade "$rel" "$chart" -n "$ns" -f "$prev" "${args[@]}" --timeout 10m
         deploy_wait "$kc" "$rel" "$ns"
+    done
+}
+
+REL_LIST=()
+i_rel() { # collect the helm releases this repo's images deploy to
+    local m
+    [[ "$6" == "-" || -z "$6" ]] && return
+    for m in ${6//,/ }; do REL_LIST+=("${m%%=*}"); done
+}
+show_running() { # one line per release this repo deploys, then its workloads and the image each runs
+    local kc rel
+    each i_rel
+    [[ ${#REL_LIST[@]} -gt 0 ]] || { say "no k3s release in this repo"; return 0; }
+    stage_kubeconfig; kc=$STAGE_KC
+    for rel in $(printf '%s\n' "${REL_LIST[@]}" | sort -u); do
+        python3 -c '
+import json, subprocess, sys
+kc, rel = sys.argv[1:3]
+def run(*a): return json.loads(subprocess.check_output(a, text=True))
+hit = [r for r in run("helm", "--kubeconfig", kc, "list", "--all-namespaces", "-o", "json") if r["name"] == rel]
+if not hit:
+    print(rel + " not installed"); sys.exit(0)
+r = hit[0]
+print("%s %s rev %s %s" % (rel, r["namespace"], r["revision"], r["status"]))
+for o in run("kubectl", "--kubeconfig", kc, "get", "deploy,sts,ds", "-A", "-o", "json")["items"]:
+    a = o["metadata"].get("annotations", {})
+    if a.get("meta.helm.sh/release-name") == rel and a.get("meta.helm.sh/release-namespace") == r["namespace"]:
+        imgs = " ".join(c["image"] for c in o["spec"]["template"]["spec"]["containers"])
+        st = o.get("status", {})
+        print("  %s/%s %s/%s ready  %s" % (o["kind"].lower(), o["metadata"]["name"], st.get("readyReplicas", 0), o["spec"].get("replicas", st.get("desiredNumberScheduled", 1)), imgs))' "$kc" "$rel"
     done
 }
 
@@ -250,9 +357,12 @@ case "${1:-}" in
         fi ;;
     smoke) each i_smoke ;;
     image-load) load_images ;;
-    deploy-only) load_images; each i_deploy; deploy_apply ;;
-    deploy) each i_deploy; deploy_apply ;;
+    stage-check) stage_kubeconfig; say "$ENV answers at $(stage_vm)" ;;
+    kubeconfig) stage_kubeconfig; cat "$STAGE_KC" ;;
+    running) show_running ;;
+    deploy-only) stage_kubeconfig; load_images; each i_deploy; deploy_apply ;;
+    deploy) stage_kubeconfig; each i_deploy; deploy_apply ;;
     push) each i_push ;;
     run) shift; IFS='|' read -r n t _ <<<"${IMAGES[0]}"; docker run --rm -it "$REGISTRY/$n:$t-$SUFFIX" "$@" ;;
-    *) echo "Usage: $0 {images|prereqs|image|sbom|test|smoke|image-load|deploy-only|deploy|push|run}" >&2; exit 1 ;;
+    *) echo "Usage: $0 {images|prereqs|image|sbom|test|smoke|image-load|stage-check|kubeconfig|running|deploy-only|deploy|push|run}" >&2; exit 1 ;;
 esac
