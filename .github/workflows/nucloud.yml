@@ -22,6 +22,9 @@ on:
       - '**/makehelp-nucloud.sh'
       - '.dockerignore'
       - '**/.dockerignore'
+      - '.iz'
+      - '.izlocal'
+      - '.gitignore'
       - '.github/workflows/nucloud.yml'
   push:
     branches: [nucloud]
@@ -39,6 +42,9 @@ on:
       - '**/makehelp-nucloud.sh'
       - '.dockerignore'
       - '**/.dockerignore'
+      - '.iz'
+      - '.izlocal'
+      - '.gitignore'
       - '.github/workflows/nucloud.yml'
   workflow_dispatch:
 

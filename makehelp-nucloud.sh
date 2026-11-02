@@ -94,8 +94,17 @@ i_smoke() {
     fi
 }
 
-stage_vm() { # the stage's incus remote and VM, from the platform repo's stage registry
-    local reg="$NUCLOUD_PLATFORM/scripts/k3s-stage.sh" remote vm
+stage_vm() { # the stage's incus remote and VM: ./.iz and .izlocal through izmachine, else the platform stage registry
+    local reg="$NUCLOUD_PLATFORM/scripts/k3s-stage.sh" remote vm hit
+    if [[ -f .iz ]] && command -v izmachine >/dev/null; then
+        hit=$(izmachine info "$ENV" --format json -f .iz 2>/dev/null | python3 -c '
+import json, sys
+want, raw = sys.argv[1], sys.stdin.read()
+for g in (json.loads(raw).get("guests", []) if raw.strip() else []):
+    if g.get("definition") == want and g.get("remote"):
+        print(g["remote"] + ":" + g.get("guest", want)); break' "$ENV") || hit=
+        [[ -z $hit ]] || { echo "$hit"; return; }
+    fi
     [[ -x $reg ]] || die "no stage registry at $reg (set NUCLOUD_PLATFORM to the izuma-dm-platform k3s checkout)"
     "$reg" require "$ENV" || die "ENV=$ENV is not a k3s stage"
     remote=$("$reg" show "$ENV" remote); vm=$("$reg" show "$ENV" vm)
