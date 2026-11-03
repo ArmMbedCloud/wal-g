@@ -19,7 +19,7 @@ os        = "ubuntu"
 osversion = "22.04"
 image     = "images:ubuntu/jammy/cloud"
 
-# Production stage: nucloud builds are never deployed here (docs/nucloud.md).
+# Production stage: listed under [nucloud] production below.
 [machine.k3s-golden]
 provider  = "incus"
 remote    = "D71"
@@ -27,3 +27,8 @@ kind      = "vm"
 os        = "ubuntu"
 osversion = "22.04"
 image     = "images:ubuntu/jammy/cloud"
+
+# Stages nucloud never deploys to. Stage targets that change a stage (image-load,
+# deploy, deploy-only) refuse these and leave them out of the picklist.
+[nucloud]
+production = ["k3s-golden"]

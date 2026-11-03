@@ -1,11 +1,30 @@
 # Building and deploying this repo
 
 This repo builds the images listed in `nucloud.env` on its `nucloud`
-branch in `~/workspace/izuma/RECODE/CLOUD/<repo>`. The branch descends from
+branch in `<dir>/NUCLOUD/REPOS/<repo>`, the layout nucloud's `setup.sh`
+creates. The branch descends from
 the archived production commit; `archive/<tag>` records its image digest.
 Each checkout keeps its local `master` ref and has one worktree.
 The rules are in [nucloud standards](https://github.com/IzumaNetworks/nucloud/blob/main/docs/standards.md),
 the stages in [nucloud setup](https://github.com/IzumaNetworks/nucloud/blob/main/docs/setup.md).
+
+## Check this machine
+
+```sh
+make help                # targets, the variables they read, this repo's own targets
+make prereqs             # one line per tool, the Docker engine, secrets and stages
+```
+
+`make prereqs` prints each check with the tool's path and version and lists
+every failure at the end, exiting 1. Output is colored only on a terminal;
+`NO_COLOR=1` or `COLOR=never` turns color off and `COLOR=always` forces it.
+The helper needs bash 4.3 or newer first on `PATH` (on macOS,
+`brew install bash`).
+
+In a repo that has its own Makefile, `make help` ends with that Makefile's
+targets. Any target nucloud does not define runs the repo's own rule. For one
+nucloud also defines, such as `build` or `clean`, `NATIVE=1 make <target>` runs
+the repo's rule.
 
 ## Build
 
@@ -30,9 +49,15 @@ and reach the build as BuildKit secrets, never as layers. A repo with
 ```sh
 make deploy MACHINE=k3s-trav
 make deploy MACHINE=k3s-cypress
+make deploy              # on a terminal: pick the stage from a list
 ```
 
-`make deploy` builds the images before importing and applying them. Use
+Every stage target takes `MACHINE=<stage>`. Without it, a terminal shows a
+numbered list of the stages in `.iz` and `.izlocal`; answer with a number or
+a stage name. Without a terminal, the target exits naming the stages.
+
+`make deploy` builds the images, imports them, upgrades their releases and
+ends with the same table `make running` prints. Use
 `make deploy-only` to import and apply images that already exist on the
 selected Docker context:
 
@@ -49,7 +74,10 @@ command never builds, pulls or pushes images. `make deploy` rejects
 
 `deploy` finds the stage's incus remote and VM in `.iz`, which every repo
 carries. `.iz` defines `k3s-ed`, `k3s-trav` and `k3s-golden` on the `D71`
-remote. `.izlocal` beside it holds private machines, such as `k3s-cypress`
+remote and lists `k3s-golden` under `[nucloud] production`: `deploy`,
+`deploy-only` and `image-load` refuse a production stage and leave it out of
+the list, while `running`, `stage-check` and `kubeconfig` read it.
+`.izlocal` beside it holds private machines, such as `k3s-cypress`
 on the `cypressLinux` remote, is never committed, and is created once from
 the template and left as you edit it. izmachine reads `~/.config/izmachine/global.iz`,
 then `.iz`, then `.izlocal`; a later file replaces an earlier definition of
@@ -66,15 +94,20 @@ current values and namespace, sets this repo's image tags and waits for its
 workloads across their namespaces. A release that renders vendored
 subcharts, which Helm does not keep in its record, takes its chart from an
 `izuma-dm-platform` checkout: `NUCLOUD_PLATFORM`, default
-`~/workspace/izuma/izuma-dm-platform`. `paas` and `zookeeper-nucloud` have
+`../../INFRA/izuma-dm-platform`, where `setup.sh` places it. `paas` and `zookeeper-nucloud` have
 such releases. The release each image goes to is the last field of its
 `nucloud.env` entry.
 
 ```sh
 make stage-check MACHINE=k3s-ed   # the stage VM answers and its kubeconfig can be fetched
 make kubeconfig MACHINE=k3s-ed    # print the stage's kubeconfig; nothing is written
-make running MACHINE=k3s-ed       # this repo's releases and the image each workload runs
+make running MACHINE=k3s-ed       # a table of this repo's releases and the build each workload runs
 ```
+
+`make running` prints one table per release: each workload, its readiness,
+its image and the commit it was built from, with how far that commit is
+behind this checkout's branch. On a terminal the branch, the commits and the
+images link to GitHub.
 
 ## Tags
 

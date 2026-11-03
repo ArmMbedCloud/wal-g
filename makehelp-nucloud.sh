@@ -14,12 +14,75 @@
 #   SMOKE_<name>=(...)            # per-image override; <name> with every non-alphanumeric as _ (SMOKE_iam_policies)
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
+ENV="${MACHINE:-${ENV:-}}"
+# Color and hyperlinks: COLOR=always|never wins; otherwise only on a terminal,
+# never under NO_COLOR (https://no-color.org) or TERM=dumb.
+case "${COLOR:-auto}" in
+    always) TTY=1 ;;
+    never) TTY= ;;
+    *) if [[ -t 1 && -z "${NO_COLOR:-}" && "${TERM:-}" != dumb ]]; then TTY=1; else TTY=; fi ;;
+esac
+if [[ -n $TTY ]]; then
+    C_OK=$'\033[32m' C_FAIL=$'\033[1;31m' C_NAME=$'\033[36m' C_BOLD=$'\033[1m' C_DIM=$'\033[2m' C_OFF=$'\033[0m'
+else
+    C_OK= C_FAIL= C_NAME= C_BOLD= C_DIM= C_OFF=
+fi
+
+stage_list() { # stage_list: "<stage>\t<file>\t<remote>\t<note>" per [machine.<stage>] in .iz then .izlocal
+    local f
+    for f in .iz .izlocal; do
+        [[ -f $f ]] || continue
+        awk -v f="$f" '
+            function flush() { if (name) print name "\t" f "\t" remote "\t" n; name = "" }
+            /^#/ { note = $0; sub(/^# */, "", note); next }
+            /^\[machine\./ { flush(); name = $0; sub(/^\[machine\./, "", name); sub(/\].*/, "", name); remote = ""; n = note; next }
+            /^\[/ { flush(); next }
+            /^remote/ { remote = $0; sub(/^[^"]*"/, "", remote); sub(/".*/, "", remote) }
+            /^$/ { note = "" }
+            END { flush() }' "$f"
+    done
+}
+production_stages() { # the stages listed under [nucloud] production = [...] in .iz or .izlocal
+    local f; for f in .iz .izlocal; do if [[ -f $f ]]; then cat "$f"; fi; done | awk '/^\[/ { sec = $0; next } sec == "[nucloud]" && /^production[ \t]*=/ { s = $0; sub(/^[^=]*=/, "", s); gsub(/[]["[:space:]]/, "", s); n = split(s, a, ","); for (i = 1; i <= n; i++) if (a[i] != "") print a[i] }'
+}
+
+show_help() { # make help: the nucloud targets, the variables they read, and a wrapper repo's own targets
+    local stages prod native shadow
+    printf '\nUsage:\n  make %s<target>%s [MACHINE=<stage>] [ONLY=<image>]\n' "$C_NAME" "$C_OFF"
+    awk -v C="$C_NAME" -v B="$C_BOLD" -v O="$C_OFF" 'BEGIN { FS = ":.*##" }
+        /^[a-zA-Z_-]+:.*##/ { d = $2; sub(/^ +/, "", d); printf "  %s%-14s%s %s\n", C, $1, O, d }
+        /^##@/ { printf "\n%s%s%s\n", B, substr($0, 5), O }' Makefile.nucloud
+    prod=$(production_stages | tr '\n' ' '); prod=${prod% }
+    stages=$(stage_list | cut -f1 | grep -vxF "$(production_stages; echo __none__)" | tr '\n' ' '); stages=${stages% }
+    printf '\n%sVariables%s\n' "$C_BOLD" "$C_OFF"
+    printf '  %s%-14s%s %s\n' "$C_NAME" "MACHINE=" "$C_OFF" "the stage for stage targets: ${stages:-none in .iz or .izlocal}"
+    [[ -z $prod ]] || printf '  %-14s %s\n' "" "$prod: production, read-only (running, stage-check, kubeconfig)"
+    printf '  %-14s %s\n' "" "${ENV:+now $ENV; }unset: a picklist on a terminal, an error elsewhere"
+    printf '  %s%-14s%s %s\n' "$C_NAME" "ONLY=" "$C_OFF" "one image by name (make images lists them)"
+    printf '  %s%-14s%s %s\n' "$C_NAME" "IMAGE_SUFFIX=" "$C_OFF" "an earlier build for deploy-only, image-load, smoke, sbom"
+    printf '  %s%-14s%s %s\n' "$C_NAME" "ARGS=" "$C_OFF" "arguments for run"
+    printf '  %s%-14s%s %s\n' "$C_NAME" "COLOR=" "$C_OFF" "always or never; default: color on a terminal unless NO_COLOR is set"
+    grep -q '^# nucloud entrypoint' Makefile 2>/dev/null || return 0
+    printf '  %s%-14s%s %s\n' "$C_NAME" "NATIVE=1" "$C_OFF" "run this repository's own rule for a target nucloud also defines"
+    shadow=" $(sed -n 's/^NUCLOUD_TARGETS := //p' Makefile) "
+    native=$(sed '/^# nucloud entrypoint/,/^else$/d' Makefile | grep -oE '^[a-zA-Z0-9_.-]+:([^=]|$)' | sed 's/:.*//' | grep -v '^\.' | sort -u)
+    [[ -n $native ]] || return 0
+    printf '\n%sRepository targets%s %s(this repository'"'"'s own Makefile; * also a nucloud target: NATIVE=1 make <target>)%s\n' "$C_BOLD" "$C_OFF" "$C_DIM" "$C_OFF"
+    printf '%s\n' "$native" | awk -v sh="$shadow" '{ n = $0; if (index(sh, " " n " ")) n = n "*"
+        if (len + length(n) + 2 > 78) { print line; line = ""; len = 0 }
+        line = line "  " n; len = length(line) } END { if (line) print line }'
+}
+[[ ${1:-} != help ]] || { show_help; exit 0; }
+
+if (( BASH_VERSINFO[0] * 100 + BASH_VERSINFO[1] < 403 )); then
+    echo "error: this helper needs bash 4.3 or newer; $BASH runs $BASH_VERSION (macOS: brew install bash)" >&2; exit 1
+fi
 [[ -f nucloud.env ]] || { echo "error: nucloud.env missing" >&2; exit 1; }
 REGISTRY=ghcr.io/izumanetworks
 SECRETS=() SSH=0 PLATFORM=linux/amd64 SMOKE_CMD=()
 # shellcheck disable=SC1091
 source nucloud.env
-ENV="${MACHINE:-${ENV:-k3s-cypress}}" ONLY="${ONLY:-}"
+ONLY="${ONLY:-}"
 GIT_HEAD="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
 # CI tags <upstream>-nucloud.<run number>. A local build tags
 # <upstream>-nucloud.dev.<commit>, plus a hash of any uncommitted changes, so
@@ -35,11 +98,38 @@ fi
 
 die() { echo "error: $*" >&2; exit 1; }
 say() { printf '==> %s\n' "$*"; }
+need_stage() { # need_stage [change]: MACHINE= names the stage; otherwise a picklist on a terminal, a refusal elsewhere.
+    # With "change" (image-load, deploy, deploy-only) a production stage is refused and left out of the picklist.
+    local -a stages=() files=() remotes=() notes=()
+    local s f r n i choice prod
+    prod=" $(production_stages | tr '\n' ' ') "
+    if [[ -n $ENV ]]; then
+        [[ ${1:-} != change || $prod != *" $ENV "* ]] || die "$ENV is production; nucloud builds are never deployed there (.iz [nucloud] production)"
+        return 0
+    fi
+    while IFS=$'\t' read -r s f r n; do
+        [[ $prod == *" $s "* ]] && { [[ ${1:-} == change ]] && continue; n="production, read-only"; }
+        stages+=("$s"); files+=("$f"); remotes+=("$r"); notes+=("$n")
+    done < <(stage_list)
+    [[ ${#stages[@]} -gt 0 ]] || die "no [machine.<stage>] in .iz or .izlocal"
+    [[ -t 0 && -t 2 ]] || die "MACHINE=<stage> is required; stages: ${stages[*]}"
+    printf '%sChoose a stage%s %s(or pass MACHINE=<stage>)%s\n' "$C_BOLD" "$C_OFF" "$C_DIM" "$C_OFF" >&2
+    for i in "${!stages[@]}"; do
+        printf '  %s%2d%s  %s%-12s%s %-13s %s%s%s\n' "$C_NAME" "$((i + 1))" "$C_OFF" "$C_BOLD" "${stages[i]}" "$C_OFF" "${remotes[i]:+on ${remotes[i]}}" "$C_DIM" "${notes[i]:-${files[i]}}" "$C_OFF" >&2
+    done
+    while :; do
+        read -r -p "stage [1-${#stages[@]}]: " choice || die "no stage chosen"
+        if [[ $choice =~ ^[0-9]+$ && $choice -ge 1 && $choice -le ${#stages[@]} ]]; then ENV=${stages[choice - 1]}; break; fi
+        for i in "${!stages[@]}"; do [[ $choice == "${stages[i]}" ]] && { ENV=$choice; break 2; }; done
+        printf '%sno such stage: %s%s\n' "$C_FAIL" "$choice" "$C_OFF" >&2
+    done
+    printf '%s==> stage %s%s\n' "$C_BOLD" "$ENV" "$C_OFF" >&2
+}
 
 if [[ -n "${IMAGE_SUFFIX:-}" ]]; then
     [[ "$IMAGE_SUFFIX" =~ ^nucloud\.(dev\.[a-f0-9]{7,40}(\.[a-f0-9]{7})?|[0-9]+)$ ]] || die "invalid IMAGE_SUFFIX=$IMAGE_SUFFIX"
     case "${1:-}" in
-        images|image-load|deploy-only|deploy|sbom|smoke) SUFFIX=$IMAGE_SUFFIX ;;
+        images|image-load|deploy-only|upgrade|sbom|smoke) SUFFIX=$IMAGE_SUFFIX ;;
         *) die "IMAGE_SUFFIX selects existing images; omit it for builds and pushes" ;;
     esac
 fi
@@ -181,9 +271,10 @@ PYCHART
     case $rc in 0) ;; 3) return 3 ;; *) die "cannot recover the chart of release $2" ;; esac
 }
 platform_chart() { # platform_chart <release> <chart name>: the chart directory in an izuma-dm-platform checkout
-    local root="${NUCLOUD_PLATFORM:-$HOME/workspace/izuma/izuma-dm-platform}" dir
+    # NUCLOUD_PLATFORM, else NUCLOUD/INFRA/izuma-dm-platform beside this NUCLOUD/REPOS checkout (setup.sh)
+    local root=${NUCLOUD_PLATFORM:-../../INFRA/izuma-dm-platform} dir
     dir=$(find "$root/charts" -name Chart.yaml -exec grep -l "^name: $2$" {} + 2>/dev/null | head -1 | xargs dirname 2>/dev/null) || dir=
-    [[ -d "$dir" ]] || die "release $1 renders vendored subcharts that its cluster record does not keep; set NUCLOUD_PLATFORM to an izuma-dm-platform checkout holding chart $2"
+    [[ -d "$dir" ]] || die "release $1 renders vendored subcharts that its cluster record does not keep; no chart $2 under $root/charts (set NUCLOUD_PLATFORM to an izuma-dm-platform checkout)"
     echo "$dir"
 }
 
@@ -300,6 +391,7 @@ print(matches[0])' "$rel")
         KUBECONFIG="$kc" helm upgrade "$rel" "$chart" -n "$ns" -f "$prev" "${args[@]}" --timeout 10m
         deploy_wait "$kc" "$rel" "$ns"
     done
+    show_running
 }
 
 REL_LIST=()
@@ -308,27 +400,68 @@ i_rel() { # collect the helm releases this repo's images deploy to
     [[ "$6" == "-" || -z "$6" ]] && return
     for m in ${6//,/ }; do REL_LIST+=("${m%%=*}"); done
 }
-show_running() { # one line per release this repo deploys, then its workloads and the image each runs
-    local kc rel
+show_running() { # a table per release this repo deploys: each workload, its readiness, image and build
+    local kc rel branch
+    REL_LIST=()
     each i_rel
     [[ ${#REL_LIST[@]} -gt 0 ]] || { say "no k3s release in this repo"; return 0; }
     stage_kubeconfig; kc=$STAGE_KC
+    branch=$(git branch --show-current 2>/dev/null || echo "")
     for rel in $(printf '%s\n' "${REL_LIST[@]}" | sort -u); do
-        python3 -c '
-import json, subprocess, sys
-kc, rel = sys.argv[1:3]
-def run(*a): return json.loads(subprocess.check_output(a, text=True))
-hit = [r for r in run("helm", "--kubeconfig", kc, "list", "--all-namespaces", "-o", "json") if r["name"] == rel]
+        python3 -I - "$kc" "$rel" "$ENV" "$REPO" "$REGISTRY" "$branch" "$GIT_HEAD" "${TTY:-}" <<'PYTABLE'
+import json, os, re, subprocess, sys
+kc, rel, stage, repo, registry, branch, head, tty = sys.argv[1:9]
+C = dict(ok="\033[32m", bad="\033[1;31m", name="\033[36m", bold="\033[1m", dim="\033[2m", off="\033[0m") if tty else dict.fromkeys(("ok", "bad", "name", "bold", "dim", "off"), "")
+def link(text, url): return "\033]8;;%s\033\\%s\033]8;;\033\\" % (url, text) if tty else text
+def run(*a): return json.loads(subprocess.check_output(a, text=True, env=dict(os.environ, KUBECONFIG=kc)))
+def git(*a):
+    try: return subprocess.check_output(("git",) + a, text=True, stderr=subprocess.DEVNULL).strip()
+    except subprocess.CalledProcessError: return None
+hit = [r for r in run("helm", "list", "--all-namespaces", "-o", "json") if r["name"] == rel]
 if not hit:
-    print(rel + " not installed"); sys.exit(0)
+    print("%s==> %s%s not installed on %s" % (C["bold"], rel, C["off"], stage)); sys.exit(0)
 r = hit[0]
-print("%s %s rev %s %s" % (rel, r["namespace"], r["revision"], r["status"]))
+status = r.get("status", "unknown")
+ok = status == "deployed"
+print("%s==> %s on %s%s  namespace %s  rev %s  %s%s%s" % (C["bold"], rel, stage, C["off"], r["namespace"], r.get("revision", "?"), C["ok"] if ok else C["bad"], status, C["off"]))
+if branch:
+    print("    branch %s at %s  images in %s" % (link(branch, "https://github.com/%s/tree/%s" % (repo, branch)), link(head[:7], "https://github.com/%s/commit/%s" % (repo, head)), registry))
+org = registry.split("/", 1)[1] if "/" in registry else registry
+rows = []  # (plain cells, styled cells)
 for o in run("kubectl", "--kubeconfig", kc, "get", "deploy,sts,ds", "-A", "-o", "json")["items"]:
     a = o["metadata"].get("annotations", {})
-    if a.get("meta.helm.sh/release-name") == rel and a.get("meta.helm.sh/release-namespace") == r["namespace"]:
-        imgs = " ".join(c["image"] for c in o["spec"]["template"]["spec"]["containers"])
-        st = o.get("status", {})
-        print("  %s/%s %s/%s ready  %s" % (o["kind"].lower(), o["metadata"]["name"], st.get("readyReplicas", 0), o["spec"].get("replicas", st.get("desiredNumberScheduled", 1)), imgs))' "$kc" "$rel"
+    if a.get("meta.helm.sh/release-name") != rel or a.get("meta.helm.sh/release-namespace") != r["namespace"]:
+        continue
+    st = o.get("status", {})
+    want = o["spec"].get("replicas", st.get("desiredNumberScheduled", 1))
+    have = st.get("readyReplicas", st.get("numberReady", 0))
+    ready = "%s/%s" % (have, want)
+    ready_s = (C["ok"] if have == want else C["bad"]) + ready + C["off"]
+    for c in o["spec"]["template"]["spec"]["containers"]:
+        image = c["image"]
+        path, _, tag = image.rpartition(":")
+        name = path[len(registry) + 1:] if path.startswith(registry + "/") else path
+        image_s = link(name, "https://github.com/orgs/%s/packages/container/package/%s" % (org, name.replace("/", "%2F"))) + ":" + tag if name != path else image
+        m = re.search(r"-nucloud\.(?:dev\.([0-9a-f]{7,40})(\.[0-9a-f]{7})?|(\d+))$", tag)
+        if m and m.group(1):
+            sha = m.group(1)
+            behind = git("rev-list", "--count", sha + "..HEAD")
+            state = "uncommitted changes" if m.group(2) else ("at HEAD" if behind == "0" else ("%s behind %s" % (behind, branch or "HEAD") if behind else "commit not in this checkout"))
+            build, build_s = "%s (%s)" % (sha[:7], state), "%s (%s%s%s)" % (link(sha[:7], "https://github.com/%s/commit/%s" % (repo, sha)), C["ok"] if state == "at HEAD" else C["dim"], state, C["off"])
+        elif m:
+            build = build_s = "CI run %s" % m.group(3)
+        else:
+            build = build_s = "not a nucloud build"
+        workload = "%s/%s" % (o["kind"].lower(), o["metadata"]["name"])
+        rows.append(((workload, ready, image if name == path else name + ":" + tag, build), (C["name"] + workload + C["off"], ready_s, image_s, build_s)))
+if not rows:
+    print("    no workloads"); sys.exit(0)
+hdr = ("WORKLOAD", "READY", "IMAGE", "BUILD")
+w = [max(len(x) for x in col) for col in zip(hdr, *(p for p, _ in rows))]
+print("    " + C["bold"] + "  ".join(h.ljust(n) for h, n in zip(hdr, w)) + C["off"])
+for plain, styled in rows:
+    print("    " + "  ".join(s + " " * (n - len(p)) for p, s, n in zip(plain, styled, w)))
+PYTABLE
     done
 }
 
@@ -338,13 +471,66 @@ i_push() {
     docker push "$7"
 }
 
+PREREQ_FAIL=()
+chk_ok()   { printf '  %sok%s    %s%-10s%s %s\n' "$C_OK" "$C_OFF" "$C_NAME" "$1" "$C_OFF" "$2"; }
+chk_fail() { printf '  %sFAIL%s  %s%-10s%s %s%s%s\n' "$C_FAIL" "$C_OFF" "$C_NAME" "$1" "$C_OFF" "$C_FAIL" "$2" "$C_OFF"; PREREQ_FAIL+=("$1"); }
+chk_tool() { # chk_tool <name> <what needs it> <version command...>: on PATH, with the version it prints
+    local path ver
+    path=$(command -v "$1") || { chk_fail "$1" "not installed; needed by $2"; return 0; }
+    ver=$("${@:3}" 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1)
+    chk_ok "$1" "$path${ver:+ $ver}"
+}
+check_prereqs() { # one line per check; every failure listed at the end, exit 1
+    local s v ctx endpoint engine stages prod
+    say "prereqs for $REPO: ${#IMAGES[@]} image(s), $PLATFORM"
+    chk_ok bash "$BASH $BASH_VERSION"
+    chk_tool git "image tags" git --version
+    chk_tool python3 "every target" python3 --version
+    chk_tool docker "build, smoke, run, image-load" docker --version
+    if command -v docker >/dev/null && docker buildx version >/dev/null 2>&1; then
+        chk_ok buildx "$(docker buildx version | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+    else
+        chk_fail buildx "docker buildx missing; needed by build"
+    fi
+    if ctx=$(docker context show 2>/dev/null); then
+        endpoint=$(docker context inspect "$ctx" --format '{{.Endpoints.docker.Host}}' 2>/dev/null || echo '?')
+        if engine=$(docker version --format '{{.Server.Os}}/{{.Server.Arch}}' 2>/dev/null); then
+            chk_ok context "$ctx ($endpoint) engine $engine, builds $PLATFORM"
+        else
+            chk_fail context "$ctx ($endpoint): engine not reachable"
+        fi
+    else
+        chk_fail context "no docker context; needed by build"
+    fi
+    chk_tool syft "sbom" syft --version
+    chk_tool izmachine "stage-check, kubeconfig, running, image-load, deploy" izmachine --version
+    chk_tool incus "image-load, deploy" incus --version
+    chk_tool kubectl "running, deploy" kubectl version --client
+    chk_tool helm "running, deploy" helm version --short
+    for s in ${SECRETS[@]+"${SECRETS[@]}"}; do
+        v="${s#*=}"
+        if [[ -n "${!v:-}" ]]; then chk_ok secret "${s%%=*} from \$$v"; else chk_fail secret "${s%%=*} needs \$$v set; needed by build"; fi
+    done
+    stages=$(stage_list | cut -f1 | tr '\n' ' '); prod=$(production_stages | tr '\n' ' ')
+    if [[ -n $stages ]]; then
+        chk_ok stages "${stages% }${prod:+ (production: ${prod% })}; MACHINE=<stage>${ENV:+, now $ENV}"
+    else
+        chk_fail stages "no [machine.<stage>] in .iz or .izlocal; needed by every stage target"
+    fi
+    if [[ ${#PREREQ_FAIL[@]} -gt 0 ]]; then
+        printf '%s==> %d check(s) failed:%s %s\n' "$C_FAIL" "${#PREREQ_FAIL[@]}" "$C_OFF" "${PREREQ_FAIL[*]}" >&2
+        exit 1
+    fi
+    printf '%s==> all checks passed:%s context %s, %d image(s)\n' "$C_OK" "$C_OFF" "$ctx" "${#IMAGES[@]}"
+}
+
+case "${1:-}" in
+    image-load|deploy-only|deploy|upgrade) need_stage change ;;
+    stage-check|kubeconfig|running) need_stage ;;
+esac
 case "${1:-}" in
     images) each i_list ;;
-    prereqs)
-        for t in docker syft; do command -v "$t" >/dev/null || die "$t not installed"; done
-        docker buildx version >/dev/null || die "docker buildx missing"
-        for s in "${SECRETS[@]}"; do v="${s#*=}"; [[ -n "${!v:-}" ]] || die "secret ${s%%=*} needs \$$v set"; done
-        say "context $(docker context show), ${#IMAGES[@]} image(s)" ;;
+    prereqs) check_prereqs ;;
     image) each i_build ;;
     sbom) each i_sbom ;;
     test)
@@ -361,8 +547,9 @@ case "${1:-}" in
     kubeconfig) stage_kubeconfig; cat "$STAGE_KC" ;;
     running) show_running ;;
     deploy-only) stage_kubeconfig; load_images; each i_deploy; deploy_apply ;;
-    deploy) stage_kubeconfig; each i_deploy; deploy_apply ;;
+    deploy) stage_kubeconfig; say "$ENV answers at $(stage_vm)"; each i_build; load_images; each i_deploy; deploy_apply ;;
+    upgrade) stage_kubeconfig; each i_deploy; deploy_apply ;;  # internal: upgrade releases to images already in the VM
     push) each i_push ;;
     run) shift; IFS='|' read -r n t _ <<<"${IMAGES[0]}"; docker run --rm -it "$REGISTRY/$n:$t-$SUFFIX" "$@" ;;
-    *) echo "Usage: $0 {images|prereqs|image|sbom|test|smoke|image-load|stage-check|kubeconfig|running|deploy-only|deploy|push|run}" >&2; exit 1 ;;
+    *) echo "error: unknown command ${1:-}; run make help" >&2; exit 2 ;;
 esac

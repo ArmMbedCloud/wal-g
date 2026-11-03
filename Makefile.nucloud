@@ -9,28 +9,27 @@
 # Set by CI to the run number; empty for a local build (tag -nucloud.dev.<commit>)
 BUILD_NUMBER     ?=
 IMAGE_SUFFIX     ?=
-ENV              ?= k3s-cypress
-# MACHINE names the stage, defined in .iz or .izlocal; ENV is its alias
+ENV              ?=
+# MACHINE names the stage, defined in .iz or .izlocal; ENV is its alias.
+# Unset, a stage target offers a picklist on a terminal and refuses elsewhere.
 MACHINE          ?= $(ENV)
 override ENV     := $(MACHINE)
 ONLY             ?=
 
-export BUILD_NUMBER IMAGE_SUFFIX ENV ONLY
+export BUILD_NUMBER IMAGE_SUFFIX ENV ONLY COLOR
 
 ##@ General
 
 .PHONY: help
-help:  ## Display this help message
-	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} \
-		/^[a-zA-Z_-]+:.*?##/ { printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2 } \
-		/^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) }' $(MAKEFILE_LIST)
+help:  ## Show the targets, the variables they read and this repository's own targets
+	@./makehelp-nucloud.sh help
 
 .PHONY: images
 images:  ## List the images this repo builds and the tag each gets
 	@./makehelp-nucloud.sh images
 
 .PHONY: prereqs
-prereqs:  ## Check docker buildx, syft, kubectl, helmfile and declared build secrets
+prereqs:  ## Check every tool, the Docker context, declared secrets and the stages, one line per check
 	@./makehelp-nucloud.sh prereqs
 
 ##@ Build
@@ -63,27 +62,27 @@ smoke:  ## Start each image briefly and check it runs
 ##@ Deploy
 
 .PHONY: image-load
-image-load:  ## Import the images into the $(ENV) k3s VM (k3s ctr images import)
+image-load:  ## Import the images into the stage VM: MACHINE=<stage> (k3s ctr images import)
 	@./makehelp-nucloud.sh image-load
 
 .PHONY: stage-check
-stage-check:  ## Check the $(ENV) VM answers and its kubeconfig can be fetched
+stage-check:  ## Check the stage VM answers and its kubeconfig can be fetched: MACHINE=<stage>
 	@./makehelp-nucloud.sh stage-check
 
 .PHONY: kubeconfig
-kubeconfig:  ## Print the $(ENV) kubeconfig fetched from its VM (written nowhere)
+kubeconfig:  ## Print the stage's kubeconfig fetched from its VM, written nowhere: MACHINE=<stage>
 	@./makehelp-nucloud.sh kubeconfig
 
 .PHONY: running
-running:  ## Show this repo's releases on $(ENV) and the image each workload runs
+running:  ## Table of this repo's releases on a stage and the build each workload runs: MACHINE=<stage>
 	@./makehelp-nucloud.sh running
 
 .PHONY: deploy
-deploy: stage-check image  ## Build images, then import and upgrade their releases on $(ENV)
-	@./makehelp-nucloud.sh deploy-only
+deploy:  ## Build the images, import them and upgrade their releases on a stage: MACHINE=<stage>
+	@./makehelp-nucloud.sh deploy
 
 .PHONY: deploy-only
-deploy-only:  ## Import and deploy existing images; IMAGE_SUFFIX= selects an earlier build
+deploy-only:  ## Import and deploy images already built; IMAGE_SUFFIX= selects an earlier build: MACHINE=<stage>
 	@./makehelp-nucloud.sh deploy-only
 
 .PHONY: push

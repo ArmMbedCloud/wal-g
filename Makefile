@@ -1,6 +1,6 @@
 # nucloud entrypoint: isolated Docker targets
 NUCLOUD_TARGETS := help prereqs images build image sbom test smoke image-load stage-check kubeconfig running deploy deploy-only push run clean
-ifeq ($(strip $(filter-out $(NUCLOUD_TARGETS),$(MAKECMDGOALS))),)
+ifeq ($(strip $(NATIVE)$(filter-out $(NUCLOUD_TARGETS),$(MAKECMDGOALS))),)
 include Makefile.nucloud
 else
 MAIN_PG_PATH := main/pg
