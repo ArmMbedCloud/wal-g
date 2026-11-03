@@ -524,6 +524,10 @@ check_prereqs() { # one line per check; every failure listed at the end, exit 1
     printf '%s==> all checks passed:%s context %s, %d image(s)\n' "$C_OK" "$C_OFF" "$ctx" "${#IMAGES[@]}"
 }
 
+if [[ ${1:-} == running ]]; then  # nothing to show needs no stage
+    REL_LIST=(); each i_rel
+    [[ ${#REL_LIST[@]} -gt 0 ]] || { say "no k3s release in this repo"; exit 0; }
+fi
 case "${1:-}" in
     image-load|deploy-only|deploy|upgrade) need_stage change ;;
     stage-check|kubeconfig|running) need_stage ;;
