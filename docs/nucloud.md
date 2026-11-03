@@ -37,7 +37,10 @@ make build ONLY=<name>   # one image
 
 Builds run entirely in Docker for `linux/amd64` on the current Docker
 context. To build on a remote Docker host, select it with
-`DOCKER_CONTEXT=<name>` in your shell. `make image` also builds the
+`DOCKER_CONTEXT=<name>` in your shell. Any Linux engine works: an amd64
+host such as `echo` builds natively, and Docker Desktop on an Apple silicon
+Mac (`desktop-linux`, linux/arm64) builds the same images under emulation,
+more slowly. `make prereqs` names the engine and says when it emulates. `make image` also builds the
 images. Nucloud build and deploy targets run independently of
 the repository's native host build prerequisites. Build
 secrets named in `nucloud.env` (`SECRETS`) come from environment variables

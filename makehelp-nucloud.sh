@@ -495,7 +495,7 @@ check_prereqs() { # one line per check; every failure listed at the end, exit 1
     if ctx=$(docker context show 2>/dev/null); then
         endpoint=$(docker context inspect "$ctx" --format '{{.Endpoints.docker.Host}}' 2>/dev/null || echo '?')
         if engine=$(docker version --format '{{.Server.Os}}/{{.Server.Arch}}' 2>/dev/null); then
-            chk_ok context "$ctx ($endpoint) engine $engine, builds $PLATFORM"
+            chk_ok context "$ctx ($endpoint) engine $engine, builds $PLATFORM$([[ $engine == "$PLATFORM" ]] || echo ", emulated (slower)")"
         else
             chk_fail context "$ctx ($endpoint): engine not reachable"
         fi
