@@ -32,3 +32,6 @@ image     = "images:ubuntu/jammy/cloud"
 # deploy, deploy-only) refuse these and leave them out of the picklist.
 [nucloud]
 production = ["k3s-golden"]
+# Stages reached through their API alone, <stage>=<api url>: test repos run suites
+# against them, and nucloud has no VM there to act on.
+endpoints = ["staging=https://api.izuma.io"]

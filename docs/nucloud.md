@@ -116,6 +116,20 @@ its image and the commit it was built from, with how far that commit is
 behind this checkout's branch. On a terminal the branch, the commits and the
 images link to GitHub.
 
+## Test repos
+
+A repo whose `nucloud.env` sets `KIND=tests` holds a suite instead of a service:
+
+```sh
+make setup MACHINE=staging   # put the stage in the condition the suite expects; safe to repeat
+make test MACHINE=staging    # run the suite against the stage's API
+```
+
+Without `MACHINE=`, a terminal offers the stages, including `staging`, which has
+no VM. `make test` reads the stage's key from `NUCLOUD_API_KEY_<STAGE>`, else
+`API_KEY=` in `~/.config/nucloud/<stage>.env`. The deploy targets refuse a test
+repo. See [standards](https://github.com/IzumaNetworks/nucloud/blob/main/docs/standards.md#test-repos).
+
 ## Tags
 
 A local build is tagged `<upstream>-nucloud.dev.<commit>`, plus a hash of

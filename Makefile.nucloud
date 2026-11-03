@@ -55,6 +55,10 @@ sbom:  ## Write sbom-<name>.spdx.json per image with syft
 test:  ## Run the repo's unit tests inside the Dockerfile's test target, if it has one
 	@./makehelp-nucloud.sh test
 
+.PHONY: setup
+setup:  ## Put the stage in the condition the suite expects; safe to repeat: MACHINE=<stage>
+	@./makehelp-nucloud.sh setup
+
 .PHONY: smoke
 smoke:  ## Start each image briefly and check it runs
 	@./makehelp-nucloud.sh smoke

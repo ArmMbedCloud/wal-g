@@ -74,8 +74,9 @@ jobs:
           ssh-private-key: ${{ secrets.IZUMABOT_SSH_KEY }}
       - name: Build
         run: make -f Makefile.nucloud image
+      # A test repo's suite needs a stage; CI builds and smokes its image.
       - name: Test
-        run: make -f Makefile.nucloud test
+        run: grep -q '^KIND=tests' nucloud.env || make -f Makefile.nucloud test
       - name: Smoke
         run: make -f Makefile.nucloud smoke
       - name: SBOM
@@ -89,6 +90,7 @@ jobs:
         env:
           ACCESS_TOKEN: ${{ secrets.ACCESS_TOKEN }}
         run: |
+          if grep -q '^KIND=tests' nucloud.env; then exit 0; fi
           echo "$ACCESS_TOKEN" | docker login ghcr.io -u IzumaBOT --password-stdin
           make -f Makefile.nucloud push
       # The runner builds any repo next: leave none of this job's images or build cache behind.
