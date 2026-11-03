@@ -15,15 +15,24 @@
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 ENV="${MACHINE:-${ENV:-}}"
-# The build context: DOCKER_CONTEXT when set, else the one setup.sh recorded for this
-# workspace in <dir>/NUCLOUD/nucloud.conf (two levels up from any INFRA or REPOS checkout),
-# else Docker's current context.
+# nucloud.conf is the one settings file for a workspace: BUILD_ROOT (the source
+# checkouts) and DOCKER_CONTEXT (the build context). It is found in the nearest
+# directory above this checkout (setup.sh writes <dir>/NUCLOUD/nucloud.conf), else at
+# ${XDG_CONFIG_HOME:-~/.config}/nucloud/nucloud.conf. The environment overrides each key.
+# The build context is DOCKER_CONTEXT from the environment, else from nucloud.conf, else
+# Docker's current context.
+conf_file() { # conf_file <dir>: the nucloud.conf that governs <dir>, or nothing
+    local d=$1
+    while d=$(dirname "$d"); [[ $d != / ]]; do [[ -f $d/nucloud.conf ]] && { echo "$d/nucloud.conf"; return 0; }; done
+    d=${XDG_CONFIG_HOME:-$HOME/.config}/nucloud/nucloud.conf
+    [[ -f $d ]] && echo "$d"
+}
+CONF=$(conf_file "$PWD") || CONF=
 CONTEXT_FROM=
 if [[ -n ${DOCKER_CONTEXT:-} ]]; then
     CONTEXT_FROM='DOCKER_CONTEXT'
-elif [[ -f ../../nucloud.conf ]]; then
-    c=$(sed -n 's/^DOCKER_CONTEXT=//p' ../../nucloud.conf | tail -1)
-    if [[ -n $c ]]; then export DOCKER_CONTEXT=$c; CONTEXT_FROM=$(cd ../.. && pwd)/nucloud.conf; fi
+elif [[ -n $CONF ]] && c=$(sed -n 's/^DOCKER_CONTEXT=//p' "$CONF" | tail -1) && [[ -n $c ]]; then
+    export DOCKER_CONTEXT=$c; CONTEXT_FROM=$CONF
 fi
 # Color and hyperlinks: COLOR=always|never wins; otherwise only on a terminal,
 # never under NO_COLOR (https://no-color.org) or TERM=dumb.

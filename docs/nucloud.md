@@ -36,8 +36,9 @@ make build ONLY=<name>   # one image
 ```
 
 Builds run entirely in Docker for `linux/amd64` on the workspace's build
-context: the Docker context nucloud's `setup.sh` recorded in
-`<dir>/NUCLOUD/nucloud.conf`, two directories above this checkout.
+context: `DOCKER_CONTEXT` in the nearest `nucloud.conf` above this checkout
+(nucloud's `setup.sh` writes `<dir>/NUCLOUD/nucloud.conf`), else in
+`~/.config/nucloud/nucloud.conf`.
 `DOCKER_CONTEXT=<name>` in your shell overrides it; with neither, Docker's
 current context builds. Any Linux engine works, local or remote: an amd64 host
 builds natively, and Docker Desktop on an Apple silicon Mac (`desktop-linux`)
