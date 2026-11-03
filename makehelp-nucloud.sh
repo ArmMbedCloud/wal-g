@@ -15,6 +15,16 @@
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 ENV="${MACHINE:-${ENV:-}}"
+# The build context: DOCKER_CONTEXT when set, else the one setup.sh recorded for this
+# workspace in <dir>/NUCLOUD/nucloud.conf (two levels up from any INFRA or REPOS checkout),
+# else Docker's current context.
+CONTEXT_FROM=
+if [[ -n ${DOCKER_CONTEXT:-} ]]; then
+    CONTEXT_FROM='DOCKER_CONTEXT'
+elif [[ -f ../../nucloud.conf ]]; then
+    c=$(sed -n 's/^DOCKER_CONTEXT=//p' ../../nucloud.conf | tail -1)
+    if [[ -n $c ]]; then export DOCKER_CONTEXT=$c; CONTEXT_FROM=$(cd ../.. && pwd)/nucloud.conf; fi
+fi
 # Color and hyperlinks: COLOR=always|never wins; otherwise only on a terminal,
 # never under NO_COLOR (https://no-color.org) or TERM=dumb.
 case "${COLOR:-auto}" in
@@ -23,9 +33,9 @@ case "${COLOR:-auto}" in
     *) if [[ -t 1 && -z "${NO_COLOR:-}" && "${TERM:-}" != dumb ]]; then TTY=1; else TTY=; fi ;;
 esac
 if [[ -n $TTY ]]; then
-    C_OK=$'\033[32m' C_FAIL=$'\033[1;31m' C_NAME=$'\033[36m' C_BOLD=$'\033[1m' C_DIM=$'\033[2m' C_OFF=$'\033[0m'
+    C_OK=$'\033[32m' C_FAIL=$'\033[1;31m' C_WARN=$'\033[33m' C_NAME=$'\033[36m' C_BOLD=$'\033[1m' C_DIM=$'\033[2m' C_OFF=$'\033[0m'
 else
-    C_OK= C_FAIL= C_NAME= C_BOLD= C_DIM= C_OFF=
+    C_OK= C_FAIL= C_WARN= C_NAME= C_BOLD= C_DIM= C_OFF=
 fi
 
 stage_list() { # stage_list: "<stage>\t<file>\t<remote>\t<note>" per [machine.<stage>] in .iz then .izlocal
@@ -474,6 +484,7 @@ i_push() {
 PREREQ_FAIL=()
 chk_ok()   { printf '  %sok%s    %s%-10s%s %s\n' "$C_OK" "$C_OFF" "$C_NAME" "$1" "$C_OFF" "$2"; }
 chk_fail() { printf '  %sFAIL%s  %s%-10s%s %s%s%s\n' "$C_FAIL" "$C_OFF" "$C_NAME" "$1" "$C_OFF" "$C_FAIL" "$2" "$C_OFF"; PREREQ_FAIL+=("$1"); }
+chk_note() { printf '  %snote%s  %s%-10s%s %s\n' "$C_WARN" "$C_OFF" "$C_NAME" "$1" "$C_OFF" "$2"; }
 chk_tool() { # chk_tool <name> <what needs it> <version command...>: on PATH, with the version it prints
     local path ver
     path=$(command -v "$1") || { chk_fail "$1" "not installed; needed by $2"; return 0; }
@@ -481,7 +492,7 @@ chk_tool() { # chk_tool <name> <what needs it> <version command...>: on PATH, wi
     chk_ok "$1" "$path${ver:+ $ver}"
 }
 check_prereqs() { # one line per check; every failure listed at the end, exit 1
-    local s v ctx endpoint engine stages prod
+    local s v ctx endpoint engine stages prod src remotes r st usable=() unusable=()
     say "prereqs for $REPO: ${#IMAGES[@]} image(s), $PLATFORM"
     chk_ok bash "$BASH $BASH_VERSION"
     chk_tool git "image tags" git --version
@@ -494,10 +505,13 @@ check_prereqs() { # one line per check; every failure listed at the end, exit 1
     fi
     if ctx=$(docker context show 2>/dev/null); then
         endpoint=$(docker context inspect "$ctx" --format '{{.Endpoints.docker.Host}}' 2>/dev/null || echo '?')
-        if engine=$(docker version --format '{{.Server.Os}}/{{.Server.Arch}}' 2>/dev/null); then
-            chk_ok context "$ctx ($endpoint) engine $engine, builds $PLATFORM$([[ $engine == "$PLATFORM" ]] || echo ", emulated (slower)")"
+        src=${CONTEXT_FROM:-the current docker context}
+        if ! engine=$(docker version --format '{{.Server.Os}}/{{.Server.Arch}}' 2>/dev/null); then
+            chk_fail context "$ctx ($endpoint, from $src): engine not reachable; choose a build context with setup.sh, or DOCKER_CONTEXT=<name>"
+        elif [[ $engine != linux/* ]]; then
+            chk_fail context "$ctx ($endpoint, from $src): engine $engine; builds need a Linux engine"
         else
-            chk_fail context "$ctx ($endpoint): engine not reachable"
+            chk_ok context "$ctx ($endpoint, from $src) engine $engine, builds $PLATFORM$([[ $engine == "$PLATFORM" ]] || echo ", emulated (slower)")"
         fi
     else
         chk_fail context "no docker context; needed by build"
@@ -516,6 +530,17 @@ check_prereqs() { # one line per check; every failure listed at the end, exit 1
         chk_ok stages "${stages% }${prod:+ (production: ${prod% })}; MACHINE=<stage>${ENV:+, now $ENV}"
     else
         chk_fail stages "no [machine.<stage>] in .iz or .izlocal; needed by every stage target"
+    fi
+    # each stage's incus remote must be registered here; a stage on a remote this machine lacks is noted, not failed
+    if [[ -n $stages ]] && command -v incus >/dev/null; then
+        remotes=" $(incus remote list --format csv 2>/dev/null | cut -d, -f1 | sed 's/ (current)//' | tr '\n' ' ') "
+        while IFS=$'\t' read -r st _ r _; do
+            [[ -n $r ]] || continue
+            if [[ $remotes == *" $r "* ]]; then usable+=("$st on $r"); else unusable+=("$st (incus remote $r missing)"); fi
+        done < <(stage_list)
+        if [[ ${#usable[@]} -gt 0 ]]; then chk_ok remotes "$(printf '%s, ' "${usable[@]}" | sed 's/, $//')"
+        else chk_fail remotes "no stage's incus remote is registered; incus remote add <name> <url>"; fi
+        [[ ${#unusable[@]} -eq 0 ]] || chk_note remotes "$(printf '%s, ' "${unusable[@]}" | sed 's/, $//'); those stages are unusable here"
     fi
     if [[ ${#PREREQ_FAIL[@]} -gt 0 ]]; then
         printf '%s==> %d check(s) failed:%s %s\n' "$C_FAIL" "${#PREREQ_FAIL[@]}" "$C_OFF" "${PREREQ_FAIL[*]}" >&2

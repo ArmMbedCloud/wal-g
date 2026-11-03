@@ -16,7 +16,8 @@ make prereqs             # one line per tool, the Docker engine, secrets and sta
 ```
 
 `make prereqs` prints each check with the tool's path and version and lists
-every failure at the end, exiting 1. Output is colored only on a terminal;
+every failure at the end, exiting 1. A stage whose incus remote this machine
+lacks is noted, not failed. Output is colored only on a terminal;
 `NO_COLOR=1` or `COLOR=never` turns color off and `COLOR=always` forces it.
 The helper needs bash 4.3 or newer first on `PATH` (on macOS,
 `brew install bash`).
@@ -29,18 +30,20 @@ the repo's rule.
 ## Build
 
 ```sh
-export DOCKER_CONTEXT=echo
 make images              # images and tags
 make build               # build every image inside Docker
 make build ONLY=<name>   # one image
 ```
 
-Builds run entirely in Docker for `linux/amd64` on the current Docker
-context. To build on a remote Docker host, select it with
-`DOCKER_CONTEXT=<name>` in your shell. Any Linux engine works: an amd64
-host such as `echo` builds natively, and Docker Desktop on an Apple silicon
-Mac (`desktop-linux`, linux/arm64) builds the same images under emulation,
-more slowly. `make prereqs` names the engine and says when it emulates. `make image` also builds the
+Builds run entirely in Docker for `linux/amd64` on the workspace's build
+context: the Docker context nucloud's `setup.sh` recorded in
+`<dir>/NUCLOUD/nucloud.conf`, two directories above this checkout.
+`DOCKER_CONTEXT=<name>` in your shell overrides it; with neither, Docker's
+current context builds. Any Linux engine works, local or remote: an amd64 host
+builds natively, and Docker Desktop on an Apple silicon Mac (`desktop-linux`)
+builds the same images under emulation, more slowly. `make prereqs` names the
+context, where it came from and its engine, and fails when the engine is not
+Linux. `make image` also builds the
 images. Nucloud build and deploy targets run independently of
 the repository's native host build prerequisites. Build
 secrets named in `nucloud.env` (`SECRETS`) come from environment variables
