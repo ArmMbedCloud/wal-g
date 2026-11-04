@@ -539,19 +539,22 @@ stage_api() { # the stage's API: API_URL in its env file, else [nucloud] endpoin
 suite() { # suite <verb> <command...>: run a command of the suite image against the stage's API
     local verb=$1 ref; shift
     need_stage api
-    NUCLOUD_API_KEY=$(stage_key "$ENV")
-    [[ -n $NUCLOUD_API_KEY ]] || die "no API key for $ENV: put API_KEY=<key> in $(stage_env_file "$ENV") or set $(stage_key_var "$ENV")"
-    NUCLOUD_STAGE=$ENV NUCLOUD_API_URL=$(stage_api "$ENV")
-    NUCLOUD_USER=$(stage_env_get "$ENV" USER) NUCLOUD_PASSWORD=$(stage_env_get "$ENV" PASSWORD)
-    NUCLOUD_ROOT_USER=$(stage_env_get "$ENV" ROOT_USER) NUCLOUD_ROOT_PASSWORD=$(stage_env_get "$ENV" ROOT_PASSWORD)
-    export NUCLOUD_STAGE NUCLOUD_API_URL NUCLOUD_API_KEY NUCLOUD_USER NUCLOUD_PASSWORD NUCLOUD_ROOT_USER NUCLOUD_ROOT_PASSWORD
+    local cred=$ENV${ACCOUNT:+-$ACCOUNT} # ACCOUNT=<name> reads <stage>-<name>.env, a second test account on the stage
+    NUCLOUD_API_KEY=$(stage_key "$cred")
+    [[ -n $NUCLOUD_API_KEY ]] || die "no API key for $cred: put API_KEY=<key> in $(stage_env_file "$cred") or set $(stage_key_var "$cred")"
+    NUCLOUD_STAGE=$ENV NUCLOUD_API_URL=$(stage_env_get "$cred" API_URL)
+    [[ -n $NUCLOUD_API_URL ]] || NUCLOUD_API_URL=$(stage_api "$ENV")
+    NUCLOUD_USER=$(stage_env_get "$cred" USER) NUCLOUD_PASSWORD=$(stage_env_get "$cred" PASSWORD)
+    NUCLOUD_ROOT_USER=$(stage_env_get "$cred" ROOT_USER) NUCLOUD_ROOT_PASSWORD=$(stage_env_get "$cred" ROOT_PASSWORD)
+    NUCLOUD_CONFIG_JSON=$(stage_env_get "$cred" CONFIG_JSON)
+    export NUCLOUD_STAGE NUCLOUD_API_URL NUCLOUD_API_KEY NUCLOUD_USER NUCLOUD_PASSWORD NUCLOUD_ROOT_USER NUCLOUD_ROOT_PASSWORD NUCLOUD_CONFIG_JSON
     IFS='|' read -r n t _ <<<"${IMAGES[0]}"; ref=$REGISTRY/$n:$t-$SUFFIX
     docker image inspect "$ref" >/dev/null 2>&1 || each i_build
     say "$verb on $ENV ($NUCLOUD_API_URL)"
     # The client is backgrounded so the trap runs on a signal; a killed client alone leaves the container calling the stage.
     SUITE_CONTAINER=nucloud-suite-$$
     docker run --rm --init --name "$SUITE_CONTAINER" --platform "$PLATFORM" -e NUCLOUD_STAGE -e NUCLOUD_API_URL -e NUCLOUD_API_KEY \
-        -e NUCLOUD_USER -e NUCLOUD_PASSWORD -e NUCLOUD_ROOT_USER -e NUCLOUD_ROOT_PASSWORD -e SUITES "$ref" "$@" &
+        -e NUCLOUD_USER -e NUCLOUD_PASSWORD -e NUCLOUD_ROOT_USER -e NUCLOUD_ROOT_PASSWORD -e NUCLOUD_CONFIG_JSON -e SUITES "$ref" "$@" &
     local client=$! rc=0
     trap 'trap "" HUP INT TERM; docker stop "$SUITE_CONTAINER" >/dev/null 2>&1 || true; exit 143' HUP INT TERM
     wait "$client" || rc=$?

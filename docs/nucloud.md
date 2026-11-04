@@ -129,7 +129,7 @@ Without `MACHINE=`, a terminal offers the stages, including `staging`, which has
 no VM. `make test` reads the stage's key from `NUCLOUD_API_KEY_<STAGE>`, else
 `API_KEY=` in `~/.config/nucloud/<stage>.env`. That file may also set `USER=`,
 `PASSWORD=`, `ROOT_USER=` and `ROOT_PASSWORD=` for suites that log in.
-`SUITES=<paths>` narrows the run to those folders or tests, for suites that read it. The deploy targets refuse a
+`SUITES=<paths>` narrows the run to those folders or tests, for suites that read it. `ACCOUNT=<name>` runs as another test account on the stage, from `<stage>-<name>.env`. The deploy targets refuse a
 test repo. See [standards](https://github.com/IzumaNetworks/nucloud/blob/main/docs/standards.md#test-repos).
 
 ## Tags
