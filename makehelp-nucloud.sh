@@ -548,8 +548,15 @@ suite() { # suite <verb> <command...>: run a command of the suite image against 
     IFS='|' read -r n t _ <<<"${IMAGES[0]}"; ref=$REGISTRY/$n:$t-$SUFFIX
     docker image inspect "$ref" >/dev/null 2>&1 || each i_build
     say "$verb on $ENV ($NUCLOUD_API_URL)"
-    docker run --rm --platform "$PLATFORM" -e NUCLOUD_STAGE -e NUCLOUD_API_URL -e NUCLOUD_API_KEY \
-        -e NUCLOUD_USER -e NUCLOUD_PASSWORD -e NUCLOUD_ROOT_USER -e NUCLOUD_ROOT_PASSWORD -e SUITES "$ref" "$@"
+    # The client is backgrounded so the trap runs on a signal; a killed client alone leaves the container calling the stage.
+    SUITE_CONTAINER=nucloud-suite-$$
+    docker run --rm --init --name "$SUITE_CONTAINER" --platform "$PLATFORM" -e NUCLOUD_STAGE -e NUCLOUD_API_URL -e NUCLOUD_API_KEY \
+        -e NUCLOUD_USER -e NUCLOUD_PASSWORD -e NUCLOUD_ROOT_USER -e NUCLOUD_ROOT_PASSWORD -e SUITES "$ref" "$@" &
+    local client=$! rc=0
+    trap 'trap "" HUP INT TERM; docker stop "$SUITE_CONTAINER" >/dev/null 2>&1 || true; exit 143' HUP INT TERM
+    wait "$client" || rc=$?
+    trap - HUP INT TERM
+    return "$rc"
 }
 
 chk_ok()   { printf '  %sok%s    %s%-10s%s %s\n' "$C_OK" "$C_OFF" "$C_NAME" "$1" "$C_OFF" "$2"; }
