@@ -522,7 +522,8 @@ i_push() {
 
 PREREQ_FAIL=()
 # A test repo's stage credential: NUCLOUD_API_KEY_<STAGE> in the environment, else
-# API_KEY= in ${XDG_CONFIG_HOME:-~/.config}/nucloud/<stage>.env, which may also set API_URL=.
+# API_KEY= in ${XDG_CONFIG_HOME:-~/.config}/nucloud/<stage>.env, which may also set API_URL=,
+# and USER=, PASSWORD=, ROOT_USER=, ROOT_PASSWORD= for suites that log in.
 stage_env_file() { echo "${XDG_CONFIG_HOME:-$HOME/.config}/nucloud/$1.env"; }
 stage_env_get() { # stage_env_get <stage> <key>
     local f; f=$(stage_env_file "$1")
@@ -541,11 +542,14 @@ suite() { # suite <verb> <command...>: run a command of the suite image against 
     NUCLOUD_API_KEY=$(stage_key "$ENV")
     [[ -n $NUCLOUD_API_KEY ]] || die "no API key for $ENV: put API_KEY=<key> in $(stage_env_file "$ENV") or set $(stage_key_var "$ENV")"
     NUCLOUD_STAGE=$ENV NUCLOUD_API_URL=$(stage_api "$ENV")
-    export NUCLOUD_STAGE NUCLOUD_API_URL NUCLOUD_API_KEY
+    NUCLOUD_USER=$(stage_env_get "$ENV" USER) NUCLOUD_PASSWORD=$(stage_env_get "$ENV" PASSWORD)
+    NUCLOUD_ROOT_USER=$(stage_env_get "$ENV" ROOT_USER) NUCLOUD_ROOT_PASSWORD=$(stage_env_get "$ENV" ROOT_PASSWORD)
+    export NUCLOUD_STAGE NUCLOUD_API_URL NUCLOUD_API_KEY NUCLOUD_USER NUCLOUD_PASSWORD NUCLOUD_ROOT_USER NUCLOUD_ROOT_PASSWORD
     IFS='|' read -r n t _ <<<"${IMAGES[0]}"; ref=$REGISTRY/$n:$t-$SUFFIX
     docker image inspect "$ref" >/dev/null 2>&1 || each i_build
     say "$verb on $ENV ($NUCLOUD_API_URL)"
-    docker run --rm --platform "$PLATFORM" -e NUCLOUD_STAGE -e NUCLOUD_API_URL -e NUCLOUD_API_KEY "$ref" "$@"
+    docker run --rm --platform "$PLATFORM" -e NUCLOUD_STAGE -e NUCLOUD_API_URL -e NUCLOUD_API_KEY \
+        -e NUCLOUD_USER -e NUCLOUD_PASSWORD -e NUCLOUD_ROOT_USER -e NUCLOUD_ROOT_PASSWORD -e SUITES "$ref" "$@"
 }
 
 chk_ok()   { printf '  %sok%s    %s%-10s%s %s\n' "$C_OK" "$C_OFF" "$C_NAME" "$1" "$C_OFF" "$2"; }
